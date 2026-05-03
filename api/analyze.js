@@ -2,7 +2,6 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -13,47 +12,74 @@ export default async function handler(req, res) {
     const {
       coin, tf, price, change24h, rsi, trend, funding, fgValue,
       atr, oi, support, resistance, optimalLongEntry, optimalShortEntry,
-      entryMode, candles
+      entryMode, mode, mtfSummary, candles
     } = req.body;
 
-    // Format candles as compact OHLCV string for pattern analysis
+    // Format candles
     const candleStr = candles && candles.length
       ? candles.slice(-50).map((c, i) =>
-          `${i + 1}. O:${c.o} H:${c.h} L:${c.l} C:${c.c} V:${Math.round(c.v)}`
+          `${i+1}. O:${c.o} H:${c.h} L:${c.l} C:${c.c} V:${Math.round(c.v)}`
         ).join('\n')
-      : 'No candle data provided';
+      : 'No candle data';
 
-    const prompt = `You are an expert crypto chart analyst and trading strategist. Analyze the following ${tf} candle data and market context for ${coin}, then provide a comprehensive trading analysis.
+    // Format MTF summary
+    let mtfStr = '';
+    if (mtfSummary) {
+      const tfLines = mtfSummary.labels.map((lbl, i) => {
+        const tfKey = Object.keys(mtfSummary.trendByTF)[i];
+        return `  ${lbl}: ${mtfSummary.trendByTF[tfKey] || 'unknown'}`;
+      }).join('\n');
+      mtfStr = `
+## Multi-Timeframe Analysis (${mode === 'swing' ? 'SWING' : 'SCALP'} MODE)
+Confluence: ${mtfSummary.confluenceLabel}
+${tfLines}
+Filter status: ${mtfSummary.filterStatus}
+${mtfSummary.filterMsg}
+Position size multiplier: ${(mtfSummary.positionSizeMultiplier * 100).toFixed(0)}%
+`;
+    }
+
+    const modeContext = mode === 'swing'
+      ? 'This is a SWING TRADE setup. Weekly trend is the dominant filter. Focus on multi-day to multi-week holds. Entries should be at key Daily/4H levels with 1H confirmation.'
+      : 'This is a SCALP TRADE setup. 4H trend is the dominant filter. Focus on 15min to 4-hour holds. Entries should be tight with 5M/15M confirmation.';
+
+    const prompt = `You are an expert crypto trading analyst specializing in ${mode === 'swing' ? 'swing' : 'scalp'} trading with high leverage. Analyze this setup and respond in raw JSON only.
+
+## Trade Mode
+${modeContext}
 
 ## Market Context
-Coin: ${coin} | Timeframe: ${tf}
-Current price: $${price} | 24h change: ${change24h}%
-RSI(14): ${rsi} | EMA trend: ${trend}
-Funding rate: ${funding}% | Fear & Greed: ${fgValue}
-ATR: $${atr} | OI: $${oi}B
-Support: $${support} | Resistance: $${resistance}
+Coin: ${coin} | Timeframe: ${tf} | Price: $${price} | 24h: ${change24h}%
+RSI(14): ${rsi} | EMA trend: ${trend} | Funding: ${funding}% | Fear&Greed: ${fgValue}
+ATR: $${atr} | OI: $${oi}B | Support: $${support} | Resistance: $${resistance}
 Optimal long entry: $${optimalLongEntry} | Optimal short entry: $${optimalShortEntry}
+${mtfStr}
 
-## Last 50 ${tf} Candles (OHLCV) — most recent is last:
+## Last 50 ${tf} Candles (OHLCV) — oldest to newest:
 ${candleStr}
 
-## Your Task
-1. Analyze the candle sequence to identify chart patterns (flags, wedges, triangles, H&S, double top/bottom, engulfing, doji, hammer, cup and handle, etc.)
-2. Determine the current pattern stage (forming, near breakout, confirmed breakout, failed)
-3. Use pattern structure to calculate precise entries, stops, and targets
-4. Cross-reference with RSI, funding, OI for confluence
+## Instructions
+1. Analyze candle structure for chart patterns
+2. Consider ALL timeframe data — weight higher timeframes more heavily for swing, lower for scalp
+3. If MTF shows counter-trend warning, reduce conviction and flag it clearly
+4. For swing mode: identify multi-day pattern, key daily levels, 1H entry trigger
+5. For scalp mode: identify micro pattern, tight entry, quick targets
+6. Factor the position size multiplier from MTF into your recommendation
 
-Respond with ONLY this JSON (no markdown, no explanation):
+Respond ONLY with this JSON (no markdown, no explanation):
 {
   "conviction": "high|medium|low",
   "bias": "long|short|neutral",
-  "summary": "2-3 sentence overall market read combining pattern + indicators",
+  "summary": "2-3 sentences combining pattern + MTF confluence",
+  "mtfVerdict": "1 sentence on what the MTF stack says overall",
+  "counterTrend": true or false,
+  "counterTrendWarning": "if counter-trend, explain risk in 1 sentence, else null",
   "pattern": {
-    "name": "exact pattern name e.g. Bull Flag, Ascending Triangle, Double Bottom",
+    "name": "pattern name",
     "stage": "forming|near breakout|confirmed|failed|none",
     "confidence": "high|medium|low",
-    "description": "1-2 sentences describing what you see in the candles",
-    "historicalWinRate": "approximate win rate % for this pattern e.g. 65%",
+    "description": "1-2 sentences on what you see in candles",
+    "historicalWinRate": "approximate % for this pattern",
     "patternTarget": price or null,
     "patternInvalidation": price or null
   },
@@ -66,14 +92,15 @@ Respond with ONLY this JSON (no markdown, no explanation):
     "shortStop": price,
     "shortTP1": price,
     "shortTP2": price,
-    "entryRationale": "1 sentence explaining why this entry based on pattern"
+    "entryRationale": "1 sentence — why this entry based on pattern + MTF"
   },
-  "longCase": "bull case based on pattern + indicators",
-  "shortCase": "bear case based on pattern + indicators",
-  "keyRisk": "biggest risk to the trade",
-  "watchLevel": "specific price level to watch for confirmation",
-  "suggestedAction": "precise actionable instruction e.g. wait for close above X then enter long targeting Y with stop at Z",
-  "historicalPattern": "what this pattern typically leads to based on historical crypto data"
+  "longCase": "bull case incorporating MTF alignment",
+  "shortCase": "bear case incorporating MTF alignment",
+  "keyRisk": "biggest risk considering MTF",
+  "watchLevel": "specific price to watch for confirmation",
+  "suggestedAction": "precise action with timeframe context e.g. wait for 1H close above X then enter targeting Y",
+  "historicalPattern": "what this pattern + MTF setup historically leads to",
+  "positionSizeNote": "recommendation on position size based on MTF alignment"
 }`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -85,7 +112,7 @@ Respond with ONLY this JSON (no markdown, no explanation):
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1200,
+        max_tokens: 1400,
         messages: [{ role: 'user', content: prompt }]
       })
     });
