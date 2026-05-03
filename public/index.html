@@ -947,7 +947,8 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
       longMaxSafeLev: setup.longMaxSafeLev || calcMaxSafeLeverage(lE, lSL),
       shortMaxSafeLev: setup.shortMaxSafeLev || calcMaxSafeLeverage(sE, sSL),
       suggestedAction: ai?.suggestedAction || '',
-      watchLevel: ai?.watchLevel || ''
+      watchLevel: ai?.watchLevel || '',
+      funding: d.funding.toFixed(4)
     };
 
     const r = await fetch('/api/alert', {
