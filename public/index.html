@@ -348,11 +348,43 @@ function calcEntries(price,ta,dec){
 
 function calcSetups(entries,dec){
   const{long:lE,short:sE,atr}=entries;
-  const lSL=+(lE-atr*1.5).toFixed(dec),lTP1=+(lE+atr*2.5).toFixed(dec),lTP2=+(lE+atr*4.0).toFixed(dec);
-  const lRisk=(lE-lSL)/lE*100,lRew=(lTP1-lE)/lE*100,lRR=lRew/lRisk;
-  const sSL=+(sE+atr*1.5).toFixed(dec),sTP1=+(sE-atr*2.5).toFixed(dec),sTP2=+(sE-atr*4.0).toFixed(dec);
-  const sRisk=(sSL-sE)/sE*100,sRew=(sE-sTP1)/sE*100,sRR=sRew/sRisk;
-  return{lE,lSL,lTP1,lTP2,lRisk,lRew,lRR,sE,sSL,sTP1,sTP2,sRisk,sRew,sRR};
+
+  // Calculate max safe stop distance based on selected leverage (Blofin formula)
+  const mmr=activeLev>=100?0.005:activeLev>=25?0.004:0.003;
+  const imr=1/activeLev;
+  const liqDist=(imr-mmr); // as decimal
+  const maxStopDec=liqDist*0.6; // max 60% of liq distance
+
+  // ATR-based stop as decimal
+  const atrStopLong=atr*1.5/lE;
+  const atrStopShort=atr*1.5/sE;
+
+  // Use tighter of ATR stop or leverage-adjusted max stop
+  const longStopDec=activeLev>1?Math.min(atrStopLong,maxStopDec):atrStopLong;
+  const shortStopDec=activeLev>1?Math.min(atrStopShort,maxStopDec):atrStopShort;
+
+  // Long setup
+  const lSL=+(lE*(1-longStopDec)).toFixed(dec);
+  const lRisk=longStopDec*100;
+  // TP scaled proportionally to risk — minimum 2:1 R:R
+  const lTP1=+(lE*(1+longStopDec*2.5)).toFixed(dec);
+  const lTP2=+(lE*(1+longStopDec*4.0)).toFixed(dec);
+  const lRew=(lTP1-lE)/lE*100;
+  const lRR=lRew/lRisk;
+
+  // Short setup
+  const sSL=+(sE*(1+shortStopDec)).toFixed(dec);
+  const sRisk=shortStopDec*100;
+  const sTP1=+(sE*(1-shortStopDec*2.5)).toFixed(dec);
+  const sTP2=+(sE*(1-shortStopDec*4.0)).toFixed(dec);
+  const sRew=(sE-sTP1)/sE*100;
+  const sRR=sRew/sRisk;
+
+  // Flag if leverage-adjusted (stop was capped by lev)
+  const levAdjustedLong=activeLev>1&&atrStopLong>maxStopDec;
+  const levAdjustedShort=activeLev>1&&atrStopShort>maxStopDec;
+
+  return{lE,lSL,lTP1,lTP2,lRisk,lRew,lRR,sE,sSL,sTP1,sTP2,sRisk,sRew,sRR,levAdjustedLong,levAdjustedShort,maxStopPct:maxStopDec*100};
 }
 
 function scoreSignal(coin,ta){
@@ -770,11 +802,12 @@ async function renderDetail(coin,klines){
       <div class="card" style="border-left:3px solid var(--green)">
         <div class="card-title" style="color:var(--green)">Long setup</div>
         <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.lE,dec)}</span></div>
-        <div class="srow"><span class="skey">Stop loss</span><span class="sval vr">$${fn(setup.lSL,dec)} <span style="font-size:9px;color:var(--text3)">-${setup.lRisk.toFixed(2)}%</span></span></div>
-        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg">$${fn(setup.lTP1,dec)} <span style="font-size:9px;color:var(--text3)">+${setup.lRew.toFixed(2)}%</span></span></div>
+        <div class="srow"><span class="skey">Stop loss</span><span class="sval vr">$${fn(setup.lSL,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.lRisk.toFixed(3)}%</span>${setup.levAdjustedLong?'<span style="font-size:10px;background:rgba(74,158,255,.15);color:var(--blue);border:1px solid rgba(74,158,255,.3);border-radius:3px;padding:1px 5px;margin-left:5px">⚡ lev-adjusted</span>':''}</span></div>
+        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg">$${fn(setup.lTP1,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.lRew.toFixed(3)}%</span></span></div>
         <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg">$${fn(setup.lTP2,dec)}</span></div>
         <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.lRR.toFixed(2)}:1 <span class="rrtag ${setup.lRR>=1.5?'rrg':'rrr'}">${setup.lRR>=1.5?'good':'weak'}</span></span></div>
         <div class="srow"><span class="skey">ATR volatility</span><span class="sval">$${fn(ta.atr,dec>2?2:dec)}</span></div>
+        <div class="srow"><span class="skey">Max stop @ ${activeLev}x</span><span class="sval" style="color:${setup.levAdjustedLong?'var(--blue)':'var(--text2)'}">${setup.maxStopPct?setup.maxStopPct.toFixed(3)+'%':'—'}</span></div>
         ${lNote}
         <div class="pattern-note" id="pattern-long-note">Analyzing chart pattern for refined entry...</div>
       </div>
@@ -783,11 +816,12 @@ async function renderDetail(coin,klines){
       <div class="card" style="border-left:3px solid var(--red)">
         <div class="card-title" style="color:var(--red)">Short setup</div>
         <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.sE,dec)}</span></div>
-        <div class="srow"><span class="skey">Stop loss</span><span class="sval vr">$${fn(setup.sSL,dec)} <span style="font-size:9px;color:var(--text3)">+${setup.sRisk.toFixed(2)}%</span></span></div>
-        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg">$${fn(setup.sTP1,dec)} <span style="font-size:9px;color:var(--text3)">-${setup.sRew.toFixed(2)}%</span></span></div>
+        <div class="srow"><span class="skey">Stop loss</span><span class="sval vr">$${fn(setup.sSL,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.sRisk.toFixed(3)}%</span>${setup.levAdjustedShort?'<span style="font-size:10px;background:rgba(74,158,255,.15);color:var(--blue);border:1px solid rgba(74,158,255,.3);border-radius:3px;padding:1px 5px;margin-left:5px">⚡ lev-adjusted</span>':''}</span></div>
+        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg">$${fn(setup.sTP1,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.sRew.toFixed(3)}%</span></span></div>
         <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg">$${fn(setup.sTP2,dec)}</span></div>
         <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.sRR.toFixed(2)}:1 <span class="rrtag ${setup.sRR>=1.5?'rrg':'rrr'}">${setup.sRR>=1.5?'good':'weak'}</span></span></div>
         <div class="srow"><span class="skey">ATR volatility</span><span class="sval">$${fn(ta.atr,dec>2?2:dec)}</span></div>
+        <div class="srow"><span class="skey">Max stop @ ${activeLev}x</span><span class="sval" style="color:${setup.levAdjustedShort?'var(--blue)':'var(--text2)'}">${setup.maxStopPct?setup.maxStopPct.toFixed(3)+'%':'—'}</span></div>
         ${sNote}
         <div class="pattern-note" id="pattern-short-note">Analyzing chart pattern for refined entry...</div>
       </div>
