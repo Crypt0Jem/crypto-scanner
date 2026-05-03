@@ -1,14 +1,11 @@
 async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
   try {
-    // Strict check: score >= 7 AND high confidence AND confirmed/near breakout
     const patternHighConf = ai?.pattern?.confidence === 'high';
     const patternReady = ai?.pattern?.stage === 'confirmed' || ai?.pattern?.stage === 'near breakout';
     if (sc < 7 || !patternHighConf || !patternReady) {
       console.log(`Alert skipped: score ${sc}/10, pattern ${ai?.pattern?.confidence}/${ai?.pattern?.stage}`);
       return;
     }
-
-    // Use pattern entries if available (tighter, better for high leverage)
     const pe = ai?.patternEntry || {};
     const lE  = pe.longEntry  || setup.lE;
     const lSL = pe.longStop   || setup.lSL;
@@ -18,11 +15,8 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
     const sSL = pe.shortStop  || setup.sSL;
     const sTP1= pe.shortTP1   || setup.sTP1;
     const sTP2= pe.shortTP2   || setup.sTP2;
-
-    // Blofin leverage calculations
     const longLev  = calcLeverage(lE, lSL, d.price, activeLev, true);
     const shortLev = calcLeverage(sE, sSL, d.price, activeLev, false);
-
     const payload = {
       coin, tf: activeTF,
       price: d.price, score: sc,
@@ -47,7 +41,6 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
       watchLevel: ai?.watchLevel || '',
       funding: d.funding.toFixed(4)
     };
-
     const r = await fetch('/api/alert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -59,7 +52,6 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
     console.error('Alert error:', e);
   }
 }
-
 async function loadAI(coin,ta,sc,setup,klines,mtfData){
   const ai=await fetchAI(coin,ta,sc,setup,klines,mtfData);
   const patternEl=document.getElementById('pattern-section');
@@ -67,7 +59,6 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData){
   const lNote=document.getElementById('pattern-long-note');
   const sNote=document.getElementById('pattern-short-note');
   const dec=COINS[coin].dec;
-
   if(!ai){
     if(patternEl)patternEl.innerHTML=`<div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div><div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Pattern analysis unavailable. Check ANTHROPIC_API_KEY in Vercel.</div>`;
     if(aiEl)aiEl.innerHTML=`<div class="card-title" style="color:var(--blue)">AI analysis — Claude</div><div style="font-size:11px;color:var(--text3);font-family:var(--mono)">AI analysis unavailable. Check ANTHROPIC_API_KEY in Vercel.</div>`;
@@ -75,12 +66,9 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData){
     if(sNote)sNote.style.display='none';
     return;
   }
-
   const pat=ai.pattern||{};
   const pe=ai.patternEntry||{};
   const confCls=pat.confidence==='high'?'pb-high':pat.confidence==='medium'?'pb-medium':'pb-low';
-
-  // Update pattern notes in setup cards
   if(lNote){
     if(pe.longEntry){
       lNote.innerHTML=`Pattern entry: $${fn(pe.longEntry,dec)} | Pattern stop: $${fn(pe.longStop,dec)} | ${pe.entryRationale||''}`;
@@ -95,8 +83,6 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData){
       sNote.style.display='none';
     }
   }
-
-  // Render pattern card
   if(patternEl){
     patternEl.innerHTML=`
       <div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div>
@@ -126,8 +112,6 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData){
       ${ai.suggestedAction?`<div class="action-level">Action: ${ai.suggestedAction}</div>`:''}
     `;
   }
-
-  // Render AI summary
   const cCol=ai.conviction==='high'?'var(--green)':ai.conviction==='medium'?'var(--amber)':'var(--text3)';
   const bCol=ai.bias==='long'?'var(--green)':ai.bias==='short'?'var(--red)':'var(--text3)';
   if(aiEl){
@@ -159,7 +143,6 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData){
       <div class="ai-pattern-hist">Historical pattern context: ${ai.historicalPattern||'—'}</div>
     `;
   }
-
 async function selectCoin(c){
   activeCoin=c;aiCache={};
   document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading ${c} (${activeMode} mode)...</span></div>`;
@@ -178,20 +161,16 @@ async function selectCoin(c){
     await renderDetail(c,klines,mtfData);
   }catch(e){document.getElementById('main-content').innerHTML=`<div class="loading-full"><span style="color:var(--red)">Error: ${e.message}</span></div>`;}
 }
-
 async function selectTF(tf,btn){
   document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');activeTF=tf;klCache={};aiCache={};
   await selectCoin(activeCoin);
 }
-
 async function setEntryMode(mode){
   entryMode=mode;aiCache={};
   const klines=klCache[activeCoin+'_'+activeTF]||[];
   if(klines.length)await renderDetail(activeCoin,klines);
 }
-
-// Seed placeholder data so page always renders
 function seedPlaceholders(){
   const defaults={BTC:78000,ETH:2300,SOL:84,XRP:1.38,SUI:0.92};
   Object.keys(COINS).forEach(c=>{
@@ -200,29 +179,19 @@ function seedPlaceholders(){
     }
   });
 }
-
 async function init(){
   const btn=document.getElementById('rbtn');
   btn.disabled=true;btn.textContent='↻ Refreshing...';
   klCache={};aiCache={};
-
-  // Seed placeholders immediately so page can render
   seedPlaceholders();
-
-  // Render page right away with placeholders
   const scores={};
   Object.keys(COINS).forEach(c=>{scores[c]=5;});
   renderSidebar(scores);
   renderAlerts(scores);
-
-  // Fetch market data with aggressive timeout — don't block render
   const fetchTimeout = 8000;
   try{
     document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading market data...</span></div>`;
-
-    // Try multiple sources in parallel, use first that responds
     const marketPromise = Promise.race([
-      // Source 1: Bybit
       (async()=>{
         const syms=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
         const results=await Promise.all(syms.map(s=>
@@ -239,27 +208,20 @@ async function init(){
         });
         return 'bybit';
       })(),
-      // Timeout — use placeholders
       new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
     ]);
-
     const source = await marketPromise;
     console.log('Market data source:', source);
-
-    // Fear & Greed best effort
     try{
       const fg=await fetchWithTimeout('https://api.alternative.me/fng/?limit=1',4000);
       const val=parseInt(fg.data[0]?.value||50);
       const lbl=fg.data[0]?.value_classification||'Neutral';
       Object.keys(COINS).forEach(c=>{mktData[c].fgValue=val;mktData[c].fgLabel=lbl;});
     }catch(e){}
-
   }catch(e){
     console.error('Market fetch error:',e);
     seedPlaceholders();
   }
-
-  // Always fetch klines and render — even with placeholder prices
   try{
     const klines=await fetchKlines(activeCoin,activeTF);
     let mtfData=null;
@@ -267,7 +229,6 @@ async function init(){
       const mtfKlines=await fetchMTFKlines(activeCoin);
       mtfData=calcMTFAnalysis(mtfKlines);
     }catch(e){console.warn('MTF failed:',e);}
-
     const newScores={};
     Object.keys(COINS).forEach(c=>{
       const kl=klCache[c+'_'+activeTF]||[];
@@ -279,8 +240,6 @@ async function init(){
   }catch(e){
     document.getElementById('main-content').innerHTML=`<div class="loading-full"><span style="color:var(--red);font-family:var(--mono);font-size:13px">Error: ${e.message}<br><br>Try refreshing</span></div>`;
   }
-
   btn.disabled=false;btn.textContent='↻ Refresh all data';
 }
-
 init();
