@@ -7,93 +7,99 @@ export default async function handler(req, res) {
 
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
-
-  if (!botToken || !chatId) {
-    return res.status(500).json({ error: 'Telegram credentials not configured' });
-  }
+  if (!botToken || !chatId) return res.status(500).json({ error: 'Telegram credentials not configured' });
 
   try {
     const {
-      coin, tf, price, score, signal, bias, conviction,
+      coin, tf, price, score, bias, conviction,
       pattern, patternStage, patternConfidence, winRate,
-      longEntry, longStop, longTP1, longTP2, longRR,
-      shortEntry, shortStop, shortTP1, shortTP2, shortRR,
+      longEntry, longStop, longTP1, longTP2,
+      shortEntry, shortStop, shortTP1, shortTP2,
       rsi, trend, funding, fgValue, leverage,
-      liqPrice, suggestedAction, watchLevel
+      liqLong, liqShort, suggestedAction, watchLevel,
+      stopDistPct, maxSafeStopPct
     } = req.body;
 
-    // Only send if all three signals align
-    const highScore = score >= 7;
-    const patternConfirmed = patternConfidence === 'high' || patternStage === 'confirmed' || patternStage === 'near breakout';
-    const priceAtEntry = Math.abs(price - longEntry) / price < 0.015; // within 1.5% of entry
+    // STRICT: require score >= 7 AND high confidence AND confirmed/near breakout
+    const highScore = parseInt(score) >= 7;
+    const patternHighConf = patternConfidence === 'high';
+    const patternReady = patternStage === 'confirmed' || patternStage === 'near breakout';
 
-    if (!highScore && !patternConfirmed) {
-      return res.status(200).json({ sent: false, reason: 'Signals not aligned yet' });
+    if (!highScore || !patternHighConf || !patternReady) {
+      return res.status(200).json({
+        sent: false,
+        reason: `Score ${score}/10 (need 7+) | Pattern: ${patternConfidence}/${patternStage} (need high/confirmed or near breakout)`
+      });
     }
+
+    const lev = parseInt(leverage) || 1;
+    const dec = price > 1000 ? 1 : price > 10 ? 2 : price > 1 ? 4 : 4;
+    const fmt = n => n ? parseFloat(n).toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec}) : '—';
+    const fmtPct = n => n ? parseFloat(n).toFixed(3) + '%' : '—';
+
+    // Safety check for high leverage
+    const stopPct = parseFloat(stopDistPct) || 0;
+    const maxSafe = parseFloat(maxSafeStopPct) || 0;
+    const stopSafe = stopPct < maxSafe || maxSafe === 0;
+    const safetyWarning = !stopSafe && lev > 1
+      ? `\n⛔ *STOP TOO WIDE FOR ${lev}x* — stop dist ${fmtPct(stopPct)} exceeds max safe ${fmtPct(maxSafe)} — reduce leverage or use pattern entry`
+      : '';
 
     const biasEmoji = bias === 'long' ? '🟢' : bias === 'short' ? '🔴' : '🟡';
-    const convEmoji = conviction === 'high' ? '🔥' : conviction === 'medium' ? '⚡' : '📊';
-    const levText = leverage && leverage > 1 ? ` @ ${leverage}x` : '';
+    const levTag = lev > 1 ? ` @ ${lev}x` : '';
+    const convTag = conviction === 'high' ? '🔥 HIGH' : conviction === 'medium' ? '⚡ MEDIUM' : '📊 LOW';
 
-    let message = `${biasEmoji} *SIGNAL ALERT — ${coin}/USDT* ${convEmoji}\n`;
-    message += `━━━━━━━━━━━━━━━━━━\n`;
-    message += `📊 Score: *${score}/10* | TF: ${tf.toUpperCase()} | Bias: ${(bias||'').toUpperCase()}\n`;
-    message += `💰 Price: *$${parseFloat(price).toLocaleString()}*\n\n`;
+    let msg = `${biasEmoji} *SIGNAL — ${coin}/USDT${levTag}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━\n`;
+    msg += `📊 Score: *${score}/10* | ${tf.toUpperCase()} | Conviction: ${convTag}\n`;
+    msg += `💰 Price: *$${fmt(price)}*\n\n`;
 
-    if (pattern && pattern !== 'No clear pattern') {
-      message += `🔍 *Pattern: ${pattern}*\n`;
-      message += `Stage: ${patternStage} | Confidence: ${patternConfidence}`;
-      if (winRate) message += ` | Win rate: ${winRate}`;
-      message += `\n\n`;
+    msg += `🔍 *Pattern: ${pattern}*\n`;
+    msg += `Stage: ${patternStage} | Confidence: ${patternConfidence}`;
+    if (winRate) msg += ` | Win rate: ${winRate}`;
+    msg += `\n\n`;
+
+    if (bias === 'long' || bias === 'neutral') {
+      msg += `🟢 *LONG SETUP${levTag}*\n`;
+      msg += `┌ Entry:  $${fmt(longEntry)}\n`;
+      msg += `├ Stop:   $${fmt(longStop)} (-${fmtPct(stopPct)})\n`;
+      msg += `├ TP1:    $${fmt(longTP1)}\n`;
+      msg += `├ TP2:    $${fmt(longTP2)}\n`;
+      if (liqLong && lev > 1) msg += `└ Liq:    $${fmt(liqLong)} ⚠\n`;
+      msg += `Max safe stop @ ${lev}x: ${fmtPct(maxSafe)}\n`;
+      msg += `Stop status: ${stopSafe ? '✅ Safe' : '❌ Beyond liq'}\n`;
+      if (longMaxSafeLev) {
+        const suit = lev <= parseInt(longMaxSafeLev) ? `✅ ${lev}x is safe (max ${longMaxSafeLev}x)` : `⛔ Too high — max safe leverage: ${longMaxSafeLev}x`;
+        msg += `Leverage suitability: ${suit}\n`;
+      }
+      msg += safetyWarning + `\n`;
     }
 
-    if (bias === 'long' || !bias || bias === 'neutral') {
-      message += `🟢 *LONG SETUP${levText}*\n`;
-      message += `Entry: $${parseFloat(longEntry).toFixed(4)}\n`;
-      message += `Stop: $${parseFloat(longStop).toFixed(4)}\n`;
-      message += `TP1: $${parseFloat(longTP1).toFixed(4)}\n`;
-      message += `TP2: $${parseFloat(longTP2).toFixed(4)}\n`;
-      message += `R:R: ${parseFloat(longRR).toFixed(2)}:1\n`;
-      if (liqPrice && leverage > 1) message += `Liq: $${parseFloat(liqPrice).toFixed(4)}\n`;
-      message += `\n`;
+    if (bias === 'short') {
+      msg += `🔴 *SHORT SETUP${levTag}*\n`;
+      msg += `┌ Entry:  $${fmt(shortEntry)}\n`;
+      msg += `├ Stop:   $${fmt(shortStop)}\n`;
+      msg += `├ TP1:    $${fmt(shortTP1)}\n`;
+      msg += `├ TP2:    $${fmt(shortTP2)}\n`;
+      if (liqShort && lev > 1) msg += `└ Liq:    $${fmt(liqShort)} ⚠\n`;
+      msg += safetyWarning + `\n`;
     }
 
-    if (bias === 'short' || (!bias || bias === 'neutral')) {
-      message += `🔴 *SHORT SETUP${levText}*\n`;
-      message += `Entry: $${parseFloat(shortEntry).toFixed(4)}\n`;
-      message += `Stop: $${parseFloat(shortStop).toFixed(4)}\n`;
-      message += `TP1: $${parseFloat(shortTP1).toFixed(4)}\n`;
-      message += `TP2: $${parseFloat(shortTP2).toFixed(4)}\n`;
-      message += `R:R: ${parseFloat(shortRR).toFixed(2)}:1\n\n`;
-    }
+    msg += `📈 RSI: ${parseFloat(rsi).toFixed(1)} | ${trend} | Funding: ${parseFloat(funding).toFixed(4)}%\n`;
+    msg += `😰 Fear & Greed: ${fgValue}\n\n`;
 
-    message += `📈 *Indicators*\n`;
-    message += `RSI: ${parseFloat(rsi).toFixed(1)} | Trend: ${trend} | Funding: ${parseFloat(funding).toFixed(4)}%\n`;
-    message += `Fear & Greed: ${fgValue}\n\n`;
+    if (watchLevel) msg += `👁 Watch: $${watchLevel}\n`;
+    if (suggestedAction) msg += `⚡ ${suggestedAction}\n`;
+    msg += `\n_Signal Scanner (Blofin) — Not financial advice_`;
 
-    if (watchLevel) message += `👁 *Watch level:* ${watchLevel}\n`;
-    if (suggestedAction) message += `⚡ *Action:* ${suggestedAction}\n`;
-
-    message += `\n_Signal Scanner — Not financial advice_`;
-
-    const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      })
+      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown', disable_web_page_preview: true })
     });
-
-    const tgData = await tgRes.json();
-    if (!tgData.ok) {
-      return res.status(500).json({ error: 'Telegram API error', details: tgData });
-    }
-
-    return res.status(200).json({ sent: true, messageId: tgData.result?.message_id });
-
+    const d = await r.json();
+    if (!d.ok) return res.status(500).json({ error: 'TG error', details: d });
+    return res.status(200).json({ sent: true });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
