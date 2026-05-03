@@ -1,6 +1,8 @@
 {
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/app1.js", "destination": "/public/app1.js" },
+    { "source": "/app2.js", "destination": "/public/app2.js" },
     { "source": "/(.*)", "destination": "/public/index.html" }
   ]
 }
