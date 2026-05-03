@@ -1,8 +1,9 @@
 {
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/app1.js", "destination": "/public/app1.js" },
-    { "source": "/app2.js", "destination": "/public/app2.js" },
-    { "source": "/(.*)", "destination": "/public/index.html" }
+    { "source": "/app1.js", "destination": "/app1.js" },
+    { "source": "/app2a.js", "destination": "/app2a.js" },
+    { "source": "/app2b.js", "destination": "/app2b.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
