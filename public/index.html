@@ -386,18 +386,32 @@ function setLev(lev,btn){
 
 function calcLeverage(entry,stop,price,lev,isLong){
   const stopDist=Math.abs(entry-stop)/entry*100;
-  const liqDist=(1/lev)*100*0.9; // ~90% of margin = liquidation
-  const maxStopForLev=liqDist*0.7; // use 70% of liq distance for stop
-  const effectiveStop=Math.min(stopDist,maxStopForLev);
-  const liqPrice=isLong
-    ? +(entry*(1-liqDist/100)).toFixed(8)
-    : +(entry*(1+liqDist/100)).toFixed(8);
-  // Recommended position size: risk 1-2% of account
-  const riskPct=1; // risk 1% of account per trade
-  const positionSizeUSDT=riskPct/(stopDist/100)*lev; // as % of account
-  const marginRequired=100/lev; // % of position as margin
-  const warningLevel=lev>=75?'extreme':lev>=50?'high':lev>=25?'medium':'low';
-  return{stopDist,liqDist,liqPrice,effectiveStop,positionSizeUSDT,marginRequired,warningLevel,maxStopPct:maxStopForLev};
+
+  // Blofin isolated margin liquidation formula
+  // MMR (maintenance margin rate) tiers for Blofin:
+  // <=125x: MMR = 0.004 (0.4%) for most alts, 0.005 (0.5%) for BTC/ETH at high notional
+  // Liq formula (isolated, long): liq = entry * (1 - IMR + MMR)
+  //   where IMR = 1/leverage
+  // Liq formula (isolated, short): liq = entry * (1 + IMR - MMR)
+  // Blofin also charges taker fee on liquidation (~0.05%)
+  const imr = 1 / lev; // initial margin rate
+  const mmr = lev >= 100 ? 0.005 : lev >= 50 ? 0.004 : 0.003; // maintenance margin rate
+  const takerFee = 0.0005; // blofin taker fee applied at liquidation
+
+  // Long liq: entry * (1 - IMR + MMR + takerFee)
+  const liqLong  = +(entry * (1 - imr + mmr + takerFee)).toFixed(2);
+  // Short liq: entry * (1 + IMR - MMR - takerFee)
+  const liqShort = +(entry * (1 + imr - mmr - takerFee)).toFixed(2);
+
+  const liqPrice = isLong ? liqLong : liqShort;
+  const liqDist  = Math.abs(entry - liqPrice) / entry * 100;
+  const maxStopForLev = liqDist * 0.6; // keep stop within 60% of liq distance
+
+  // Position sizing: risk 1% of account per trade
+  const positionSizeUSDT = stopDist > 0 ? (1 / stopDist * 100) : 0;
+  const warningLevel = lev >= 75 ? 'extreme' : lev >= 50 ? 'high' : lev >= 25 ? 'medium' : 'low';
+
+  return { stopDist, liqDist, liqPrice, liqLong, liqShort, maxStopPct: maxStopForLev, positionSizeUSDT, warningLevel, imr, mmr };
 }
 
 function buildCustomChart(klines, setup, dec, lev) {
@@ -526,15 +540,17 @@ function buildLevCard(price, setup, lev, dec) {
     badge.style.color = riskColor;
   }
 
+  const stopSafeL = longLev.stopDist < longLev.liqDist;
+  const stopSafeS = shortLev.stopDist < shortLev.liqDist;
   grid.innerHTML = `
     <div class="lev-item"><div class="li-label">Leverage</div><div class="li-val" style="color:${riskColor}">${lev}x</div></div>
-    <div class="lev-item"><div class="li-label">Margin needed</div><div class="li-val">${(100/lev).toFixed(2)}% of pos</div></div>
+    <div class="lev-item"><div class="li-label">Initial margin</div><div class="li-val">${(longLev.imr*100).toFixed(2)}% of pos</div></div>
+    <div class="lev-item"><div class="li-label">Maint. margin (MMR)</div><div class="li-val">${(longLev.mmr*100).toFixed(2)}%</div></div>
+    <div class="lev-item"><div class="li-label">Max safe stop %</div><div class="li-val" style="color:${stopSafeL?'var(--green)':'var(--red)'}">${longLev.maxStopPct.toFixed(3)}%</div></div>
     <div class="lev-item"><div class="li-label">Long liq price</div><div class="li-val" style="color:var(--red)">$${fn(longLev.liqPrice, dec)}</div></div>
+    <div class="lev-item"><div class="li-label">Long stop dist</div><div class="li-val" style="color:${stopSafeL?'var(--green)':'var(--red)'}">${longLev.stopDist.toFixed(3)}% ${stopSafeL?'✓':'✗ beyond liq'}</div></div>
     <div class="lev-item"><div class="li-label">Short liq price</div><div class="li-val" style="color:var(--red)">$${fn(shortLev.liqPrice, dec)}</div></div>
-    <div class="lev-item"><div class="li-label">Long stop dist</div><div class="li-val">${longLev.stopDist.toFixed(2)}%</div></div>
-    <div class="lev-item"><div class="li-label">Max safe stop</div><div class="li-val" style="color:${longLev.stopDist > longLev.maxStopPct ? 'var(--red)':'var(--green)'}">${longLev.maxStopPct.toFixed(2)}%</div></div>
-    <div class="lev-item"><div class="li-label">Rec. position size</div><div class="li-val vg">${(longLev.positionSizeUSDT).toFixed(1)}% of account</div></div>
-    <div class="lev-item"><div class="li-label">Stop vs liq</div><div class="li-val" style="color:${longLev.stopDist < longLev.liqDist ? 'var(--green)':'var(--red)'}">${longLev.stopDist < longLev.liqDist ? 'Safe ✓' : 'Stop beyond liq ✗'}</div></div>
+    <div class="lev-item"><div class="li-label">Rec. position size</div><div class="li-val vg">${longLev.positionSizeUSDT.toFixed(1)}% of account</div></div>
   `;
 
   const stopSafe = longLev.stopDist < longLev.liqDist;
@@ -544,6 +560,7 @@ function buildLevCard(price, setup, lev, dec) {
   if (lev >= 50) warnMsgs.push(`Position size rec: ${(longLev.positionSizeUSDT).toFixed(1)}% of account risking 1% per trade — never risk more than 2%`);
   warnMsgs.push(`Long entry: $${fn(setup.lE, dec)} | Stop: $${fn(setup.lSL, dec)} | Liq: $${fn(longLev.liqPrice, dec)}`);
 
+  warnMsgs.push(`Exchange: Blofin isolated margin formula (IMR ${(longLev.imr*100).toFixed(2)}% - MMR ${(longLev.mmr*100).toFixed(2)}% - taker fee 0.05%). Always verify liq price on Blofin before entering.`);
   if (warn) warn.innerHTML = warnMsgs.join('<br>');
 }
 
