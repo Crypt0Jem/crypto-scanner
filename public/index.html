@@ -244,9 +244,17 @@ async function fetchKlines(coin,tf){
   const key=coin+'_'+tf;
   if(klCache[key])return klCache[key];
   const data=await api({type:'klines',symbol:COINS[coin].sym,interval:TF_BI[tf],limit:100});
+  if(!Array.isArray(data)){console.error('Klines error:',data);return [];}
   const klines=data.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
   klCache[key]=klines;return klines;
 }
+
+
+
+
+
+
+
 
 function calcTA(klines){
   if(!klines||klines.length<14)return{rsi:50,ema20:0,ema50:null,atr:0,trend:'neutral',support:0,resistance:0,volProfile:[],poc:0};
