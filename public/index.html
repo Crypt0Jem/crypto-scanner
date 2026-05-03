@@ -313,37 +313,56 @@ async function api(params){
 }
 
 async function fetchMarket(){
-  let tickers=[];
-  try{ tickers=await api({type:'tickers'}); }
-  catch(e){ console.error('Tickers failed:',e); }
-  if(!Array.isArray(tickers)||!tickers.length){
-    // Fallback: use Bybit directly from browser
-    try{
-      const syms=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
-      const results=await Promise.allSettled(syms.map(s=>
-        fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`,6000)
-      ));
-      tickers=results.map((r,i)=>{
-        if(r.status!=='fulfilled')return null;
-        const t=r.value?.result?.list?.[0];
-        if(!t)return null;
-        const price=parseFloat(t.lastPrice);
-        const open24=parseFloat(t.prevPrice24h);
-        return{symbol:syms[i],lastPrice:t.lastPrice,priceChangePercent:open24?((price-open24)/open24*100).toFixed(4):'0',highPrice:t.highPrice24h,lowPrice:t.lowPrice24h,quoteVolume:t.turnover24h};
-      }).filter(Boolean);
-    }catch(e2){ console.error('Bybit fallback also failed:',e2); }
-  }
-  tickers.forEach(t=>{
-    const coin=Object.keys(COINS).find(c=>COINS[c].sym===t.symbol);
-    if(!coin)return;
-    mktData[coin]={price:parseFloat(t.lastPrice),change24h:parseFloat(t.priceChangePercent),high24h:parseFloat(t.highPrice),low24h:parseFloat(t.lowPrice),volume24h:parseFloat(t.quoteVolume),funding:0,oi:0,oiNotional:0,fgValue:50,fgLabel:'Neutral'};
+  // Fetch all data directly from Bybit browser API — no proxy needed
+  const syms = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
+  const cgIds = {BTCUSDT:'bitcoin',ETHUSDT:'ethereum',SOLUSDT:'solana',XRPUSDT:'ripple',SUIUSDT:'sui'};
+
+  // Prices from Bybit (browser CORS works)
+  const tickerResults = await Promise.allSettled(syms.map(s =>
+    fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`, 6000)
+  ));
+
+  tickerResults.forEach((r, i) => {
+    const s = syms[i];
+    const coin = Object.keys(COINS).find(c => COINS[c].sym === s);
+    if (!coin) return;
+    let price = 0, change24h = 0, high24h = 0, low24h = 0, volume24h = 0;
+    if (r.status === 'fulfilled') {
+      const t = r.value?.result?.list?.[0];
+      if (t) {
+        price = parseFloat(t.lastPrice) || 0;
+        const open24 = parseFloat(t.prevPrice24h) || price;
+        change24h = open24 ? (price - open24) / open24 * 100 : 0;
+        high24h = parseFloat(t.highPrice24h) || 0;
+        low24h = parseFloat(t.lowPrice24h) || 0;
+        volume24h = parseFloat(t.turnover24h) || 0;
+      }
+    }
+    mktData[coin] = { price, change24h, high24h, low24h, volume24h, funding: 0, oi: 0, oiNotional: 0, fgValue: 50, fgLabel: 'Neutral' };
   });
-  await Promise.allSettled(Object.entries(COINS).map(async([coin,meta])=>{
-    try{const fi=await api({type:'funding',symbol:meta.sym});mktData[coin].funding=parseFloat(fi.lastFundingRate)*100;}catch(e){}
-    try{const oi=await api({type:'oi',symbol:meta.sym});mktData[coin].oi=parseFloat(oi.openInterest);mktData[coin].oiNotional=mktData[coin].oi*mktData[coin].price;}catch(e){}
+
+  // Funding + OI from Bybit (best effort)
+  await Promise.allSettled(Object.entries(COINS).map(async ([coin, meta]) => {
+    try {
+      const t = (await fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${meta.sym}`, 5000))?.result?.list?.[0];
+      if (t) {
+        mktData[coin].funding = parseFloat(t.fundingRate) * 100 || 0;
+        const oi = parseFloat(t.openInterest) || 0;
+        mktData[coin].oi = oi;
+        mktData[coin].oiNotional = oi * mktData[coin].price;
+      }
+    } catch(e) {}
   }));
-  try{const fg=await api({type:'fg'});const val=parseInt(fg.data[0]?.value||50);const lbl=fg.data[0]?.value_classification||'Neutral';Object.keys(COINS).forEach(c=>{mktData[c].fgValue=val;mktData[c].fgLabel=lbl;});}catch(e){}
+
+  // Fear & Greed (best effort)
+  try {
+    const fg = await fetchWithTimeout('https://api.alternative.me/fng/?limit=1', 5000);
+    const val = parseInt(fg.data[0]?.value || 50);
+    const lbl = fg.data[0]?.value_classification || 'Neutral';
+    Object.keys(COINS).forEach(c => { mktData[c].fgValue = val; mktData[c].fgLabel = lbl; });
+  } catch(e) {}
 }
+
 
 async function fetchKlines(coin,tf){
   const key=coin+'_'+tf;
@@ -1381,26 +1400,95 @@ async function setEntryMode(mode){
   if(klines.length)await renderDetail(activeCoin,klines);
 }
 
+// Seed placeholder data so page always renders
+function seedPlaceholders(){
+  const defaults={BTC:78000,ETH:2300,SOL:84,XRP:1.38,SUI:0.92};
+  Object.keys(COINS).forEach(c=>{
+    if(!mktData[c]||!mktData[c].price){
+      mktData[c]={price:defaults[c]||1,change24h:0,high24h:defaults[c]*1.02||1,low24h:defaults[c]*0.98||1,volume24h:1000000000,funding:0.0001,oi:0,oiNotional:0,fgValue:50,fgLabel:'Neutral'};
+    }
+  });
+}
+
 async function init(){
   const btn=document.getElementById('rbtn');
   btn.disabled=true;btn.textContent='↻ Refreshing...';
   klCache={};aiCache={};
+
+  // Seed placeholders immediately so page can render
+  seedPlaceholders();
+
+  // Render page right away with placeholders
+  const scores={};
+  Object.keys(COINS).forEach(c=>{scores[c]=5;});
+  renderSidebar(scores);
+  renderAlerts(scores);
+
+  // Fetch market data with aggressive timeout — don't block render
+  const fetchTimeout = 8000;
   try{
-    await fetchMarket();
+    document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading market data...</span></div>`;
+
+    // Try multiple sources in parallel, use first that responds
+    const marketPromise = Promise.race([
+      // Source 1: Bybit
+      (async()=>{
+        const syms=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
+        const results=await Promise.all(syms.map(s=>
+          fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`,5000)
+        ));
+        results.forEach((r,i)=>{
+          const coin=Object.keys(COINS).find(c=>COINS[c].sym===syms[i]);
+          if(!coin)return;
+          const t=r?.result?.list?.[0];
+          if(!t)return;
+          const price=parseFloat(t.lastPrice)||0;
+          const open24=parseFloat(t.prevPrice24h)||price;
+          mktData[coin]={price,change24h:open24?((price-open24)/open24*100):0,high24h:parseFloat(t.highPrice24h)||0,low24h:parseFloat(t.lowPrice24h)||0,volume24h:parseFloat(t.turnover24h)||0,funding:parseFloat(t.fundingRate)*100||0,oi:parseFloat(t.openInterest)||0,oiNotional:(parseFloat(t.openInterest)||0)*price,fgValue:mktData[coin]?.fgValue||50,fgLabel:mktData[coin]?.fgLabel||'Neutral'};
+        });
+        return 'bybit';
+      })(),
+      // Timeout — use placeholders
+      new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
+    ]);
+
+    const source = await marketPromise;
+    console.log('Market data source:', source);
+
+    // Fear & Greed best effort
+    try{
+      const fg=await fetchWithTimeout('https://api.alternative.me/fng/?limit=1',4000);
+      const val=parseInt(fg.data[0]?.value||50);
+      const lbl=fg.data[0]?.value_classification||'Neutral';
+      Object.keys(COINS).forEach(c=>{mktData[c].fgValue=val;mktData[c].fgLabel=lbl;});
+    }catch(e){}
+
+  }catch(e){
+    console.error('Market fetch error:',e);
+    seedPlaceholders();
+  }
+
+  // Always fetch klines and render — even with placeholder prices
+  try{
     const klines=await fetchKlines(activeCoin,activeTF);
-    await Promise.allSettled(Object.keys(COINS).filter(c=>c!==activeCoin).map(c=>fetchKlines(c,activeTF)));
-    const scores={};Object.keys(COINS).forEach(c=>{scores[c]=scoreSignal(c,calcTA(klCache[c+'_'+activeTF]||[]));});
-    renderSidebar(scores);renderAlerts(scores);
-    let mtfData = null;
-    try {
-      const mtfKlines = await fetchMTFKlines(activeCoin);
-      mtfData = calcMTFAnalysis(mtfKlines);
-    } catch(e) { console.warn('MTF fetch failed:', e); }
+    let mtfData=null;
+    try{
+      const mtfKlines=await fetchMTFKlines(activeCoin);
+      mtfData=calcMTFAnalysis(mtfKlines);
+    }catch(e){console.warn('MTF failed:',e);}
+
+    const newScores={};
+    Object.keys(COINS).forEach(c=>{
+      const kl=klCache[c+'_'+activeTF]||[];
+      newScores[c]=scoreSignal(c,calcTA(kl),null);
+    });
+    renderSidebar(newScores);renderAlerts(newScores);
     await renderDetail(activeCoin,klines,mtfData);
     document.getElementById('last-upd').textContent='Updated '+new Date().toLocaleTimeString();
   }catch(e){
-    document.getElementById('main-content').innerHTML=`<div class="loading-full"><span style="color:var(--red);font-family:var(--mono);font-size:12px">Error: ${e.message}</span></div>`;
+    document.getElementById('main-content').innerHTML=`<div class="loading-full"><span style="color:var(--red);font-family:var(--mono);font-size:13px">Error: ${e.message}<br><br>Try refreshing</span></div>`;
   }
+
   btn.disabled=false;btn.textContent='↻ Refresh all data';
 }
 
