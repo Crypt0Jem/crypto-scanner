@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     const {
       coin, tf, price, change24h, rsi, trend, funding, fgValue,
       atr, oi, support, resistance, optimalLongEntry, optimalShortEntry,
-      entryMode, mode, mtfSummary, candles
+      entryMode, mode, mtfSummary, liqZones, candles
     } = req.body;
 
     // Format candles
@@ -23,6 +23,26 @@ export default async function handler(req, res) {
       : 'No candle data';
 
     // Format MTF summary
+    let liqStr = '';
+    if (liqZones) {
+      liqStr = `
+## Estimated Liquidation Zones
+Market bias: ${liqZones.fundingBias}
+Long liquidation cluster (10x-50x longs get wiped): ${liqZones.majorLongCluster}
+Short liquidation cluster (10x-50x shorts get wiped): ${liqZones.majorShortCluster}
+Nearest long sweep target: $${liqZones.nearestLongSweep} (125x longs)
+Nearest short squeeze target: $${liqZones.nearestShortSweep} (125x shorts)
+High-significance long liq levels: $${liqZones.topLongLiq}
+High-significance short liq levels: $${liqZones.topShortLiq}
+
+Use this data to:
+1. Identify likely liquidity sweep targets before real moves
+2. Avoid placing stops at obvious liquidation levels
+3. Target entries near major liq clusters (price magnets)
+4. Flag if current price is near a major cluster (reversal risk)
+`;
+    }
+
     let mtfStr = '';
     if (mtfSummary) {
       const tfLines = mtfSummary.labels.map((lbl, i) => {
@@ -53,7 +73,7 @@ Coin: ${coin} | Timeframe: ${tf} | Price: $${price} | 24h: ${change24h}%
 RSI(14): ${rsi} | EMA trend: ${trend} | Funding: ${funding}% | Fear&Greed: ${fgValue}
 ATR: $${atr} | OI: $${oi}B | Support: $${support} | Resistance: $${resistance}
 Optimal long entry: $${optimalLongEntry} | Optimal short entry: $${optimalShortEntry}
-${mtfStr}
+${mtfStr}${liqStr}
 
 ## Last 50 ${tf} Candles (OHLCV) — oldest to newest:
 ${candleStr}
@@ -62,6 +82,8 @@ ${candleStr}
 1. Analyze candle structure for chart patterns
 2. Consider ALL timeframe data — weight higher timeframes more heavily for swing, lower for scalp
 3. If MTF shows counter-trend warning, reduce conviction and flag it clearly
+4. Factor liquidation zones into entry/target recommendations — note if price is near a liq cluster
+5. Mention the nearest sweep target in your suggested action if relevant
 4. For swing mode: identify multi-day pattern, key daily levels, 1H entry trigger
 5. For scalp mode: identify micro pattern, tight entry, quick targets
 6. Factor the position size multiplier from MTF into your recommendation
