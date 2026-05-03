@@ -414,6 +414,35 @@ function calcLeverage(entry,stop,price,lev,isLong){
   return { stopDist, liqDist, liqPrice, liqLong, liqShort, maxStopPct: maxStopForLev, positionSizeUSDT, warningLevel, imr, mmr };
 }
 
+function calcMaxSafeLeverage(entry, stop) {
+  // Find highest leverage where stop distance < 60% of liquidation distance
+  // Blofin MMR tiers: 0.003 (<25x), 0.004 (25-99x), 0.005 (100x+)
+  const stopDist = Math.abs(entry - stop) / entry;
+  const leverages = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 125];
+  let maxSafe = 1;
+  for (const lev of leverages) {
+    const mmr = lev >= 100 ? 0.005 : lev >= 25 ? 0.004 : 0.003;
+    const imr = 1 / lev;
+    const liqDist = (imr - mmr); // as decimal
+    const maxStop = liqDist * 0.6; // 60% of liq distance
+    if (stopDist <= maxStop) maxSafe = lev;
+    else break;
+  }
+  return maxSafe;
+}
+
+function getLeverageSuitability(entry, stop, selectedLev) {
+  const maxSafe = calcMaxSafeLeverage(entry, stop);
+  const stopDist = Math.abs(entry - stop) / entry * 100;
+  const isOk = selectedLev <= maxSafe;
+  let rating, color, emoji;
+  if (selectedLev <= maxSafe * 0.6) { rating = 'Conservative'; color = 'var(--green)'; emoji = '✅'; }
+  else if (selectedLev <= maxSafe) { rating = 'Acceptable'; color = 'var(--amber)'; emoji = '⚠️'; }
+  else if (selectedLev <= maxSafe * 1.5) { rating = 'Risky'; color = 'var(--red)'; emoji = '🔴'; }
+  else { rating = 'Dangerous'; color = 'var(--red)'; emoji = '⛔'; }
+  return { maxSafe, stopDist, isOk, rating, color, emoji };
+}
+
 function buildCustomChart(klines, setup, dec, lev) {
   const canvas = document.getElementById('custom-chart');
   if (!canvas || !klines || klines.length < 2) return;
@@ -521,46 +550,65 @@ function buildCustomChart(klines, setup, dec, lev) {
 }
 
 function buildLevCard(price, setup, lev, dec) {
-  const longLev = calcLeverage(setup.lE, setup.lSL, price, lev, true);
+  const longLev  = calcLeverage(setup.lE, setup.lSL, price, lev, true);
   const shortLev = calcLeverage(setup.sE, setup.sSL, price, lev, false);
+  const longSuit  = getLeverageSuitability(setup.lE, setup.lSL, lev);
+  const shortSuit = getLeverageSuitability(setup.sE, setup.sSL, lev);
 
-  // Update setup with liquidation prices
+  // Store for chart and alerts
   setup.lLiq = longLev.liqPrice;
   setup.sLiq = shortLev.liqPrice;
+  setup.longMaxSafeLev  = longSuit.maxSafe;
+  setup.shortMaxSafeLev = shortSuit.maxSafe;
 
-  const grid = document.getElementById('lev-grid');
-  const warn = document.getElementById('lev-warning-text');
+  const grid  = document.getElementById('lev-grid');
+  const warn  = document.getElementById('lev-warning-text');
   const badge = document.getElementById('lev-warning-badge');
+  const title = document.getElementById('lev-suit-title');
   if (!grid) return;
 
-  const riskColor = lev >= 75 ? 'var(--red)' : lev >= 25 ? 'var(--amber)' : 'var(--green)';
+  // Suitability badge
   if (badge) {
-    badge.textContent = lev >= 75 ? 'EXTREME RISK' : lev >= 25 ? 'HIGH RISK' : 'MODERATE';
-    badge.style.background = lev >= 75 ? 'rgba(255,77,77,.25)' : lev >= 25 ? 'rgba(245,166,35,.2)' : 'rgba(0,208,132,.15)';
-    badge.style.color = riskColor;
+    badge.textContent = `${longSuit.emoji} ${longSuit.rating} for ${lev}x`;
+    badge.style.background = longSuit.isOk ? 'rgba(245,166,35,.15)' : 'rgba(255,77,77,.25)';
+    badge.style.color = longSuit.color;
   }
 
+  // Suitability banner — most prominent element
+  const suitBanner = longSuit.isOk
+    ? `<div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.3);border-radius:7px;padding:10px 12px;margin-bottom:10px;font-family:var(--mono)">
+        <div style="font-size:10px;color:var(--amber);font-weight:500;margin-bottom:4px">${longSuit.emoji} LEVERAGE SUITABILITY — ${longSuit.rating.toUpperCase()}</div>
+        <div style="font-size:11px;color:var(--text)">Your <strong>${lev}x</strong> is within the max safe leverage of <strong>${longSuit.maxSafe}x</strong> for this setup's stop distance (${longSuit.stopDist.toFixed(3)}%)</div>
+      </div>`
+    : `<div style="background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.4);border-radius:7px;padding:10px 12px;margin-bottom:10px;font-family:var(--mono)">
+        <div style="font-size:10px;color:var(--red);font-weight:500;margin-bottom:4px">⛔ LEVERAGE TOO HIGH FOR THIS SETUP</div>
+        <div style="font-size:12px;color:var(--text);margin-bottom:6px">Your selected <strong style="color:var(--red)">${lev}x</strong> exceeds the max safe leverage of <strong style="color:var(--green)">${longSuit.maxSafe}x</strong> for this stop distance (${longSuit.stopDist.toFixed(3)}%)</div>
+        <div style="font-size:11px;color:var(--red)">→ Reduce to <strong>${longSuit.maxSafe}x</strong> or less, OR use the tighter pattern entry to reduce stop distance</div>
+      </div>`;
+
   const stopSafeL = longLev.stopDist < longLev.liqDist;
-  const stopSafeS = shortLev.stopDist < shortLev.liqDist;
-  grid.innerHTML = `
-    <div class="lev-item"><div class="li-label">Leverage</div><div class="li-val" style="color:${riskColor}">${lev}x</div></div>
-    <div class="lev-item"><div class="li-label">Initial margin</div><div class="li-val">${(longLev.imr*100).toFixed(2)}% of pos</div></div>
-    <div class="lev-item"><div class="li-label">Maint. margin (MMR)</div><div class="li-val">${(longLev.mmr*100).toFixed(2)}%</div></div>
-    <div class="lev-item"><div class="li-label">Max safe stop %</div><div class="li-val" style="color:${stopSafeL?'var(--green)':'var(--red)'}">${longLev.maxStopPct.toFixed(3)}%</div></div>
-    <div class="lev-item"><div class="li-label">Long liq price</div><div class="li-val" style="color:var(--red)">$${fn(longLev.liqPrice, dec)}</div></div>
-    <div class="lev-item"><div class="li-label">Long stop dist</div><div class="li-val" style="color:${stopSafeL?'var(--green)':'var(--red)'}">${longLev.stopDist.toFixed(3)}% ${stopSafeL?'✓':'✗ beyond liq'}</div></div>
-    <div class="lev-item"><div class="li-label">Short liq price</div><div class="li-val" style="color:var(--red)">$${fn(shortLev.liqPrice, dec)}</div></div>
-    <div class="lev-item"><div class="li-label">Rec. position size</div><div class="li-val vg">${longLev.positionSizeUSDT.toFixed(1)}% of account</div></div>
+  grid.innerHTML = suitBanner + `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px">
+      <div class="lev-item"><div class="li-label">Selected leverage</div><div class="li-val" style="color:${longSuit.color}">${lev}x</div></div>
+      <div class="lev-item"><div class="li-label">Max safe leverage</div><div class="li-val" style="color:${longSuit.isOk?'var(--green)':'var(--red)'}">${longSuit.maxSafe}x</div></div>
+      <div class="lev-item"><div class="li-label">Long liq price</div><div class="li-val" style="color:var(--red)">$${fn(longLev.liqPrice, dec)}</div></div>
+      <div class="lev-item"><div class="li-label">Short liq price</div><div class="li-val" style="color:var(--red)">$${fn(shortLev.liqPrice, dec)}</div></div>
+      <div class="lev-item"><div class="li-label">Stop distance</div><div class="li-val" style="color:${stopSafeL?'var(--green)':'var(--red)'}">${longLev.stopDist.toFixed(3)}%</div></div>
+      <div class="lev-item"><div class="li-label">Max safe stop</div><div class="li-val">${longLev.maxStopPct.toFixed(3)}%</div></div>
+      <div class="lev-item"><div class="li-label">Liq distance</div><div class="li-val">${longLev.liqDist.toFixed(3)}%</div></div>
+      <div class="lev-item"><div class="li-label">Rec. position size</div><div class="li-val vg">${longLev.positionSizeUSDT.toFixed(1)}% of acct</div></div>
+    </div>
   `;
 
-  const stopSafe = longLev.stopDist < longLev.liqDist;
   const warnMsgs = [];
-  if (!stopSafe) warnMsgs.push(`⚠ Stop loss (${longLev.stopDist.toFixed(2)}%) is beyond liquidation (${longLev.liqDist.toFixed(2)}%) — reduce leverage or widen stop`);
-  if (lev >= 75) warnMsgs.push(`⚠ At ${lev}x, price only needs to move ${longLev.liqDist.toFixed(2)}% against you to liquidate — use limit orders only`);
-  if (lev >= 50) warnMsgs.push(`Position size rec: ${(longLev.positionSizeUSDT).toFixed(1)}% of account risking 1% per trade — never risk more than 2%`);
-  warnMsgs.push(`Long entry: $${fn(setup.lE, dec)} | Stop: $${fn(setup.lSL, dec)} | Liq: $${fn(longLev.liqPrice, dec)}`);
-
-  warnMsgs.push(`Exchange: Blofin isolated margin formula (IMR ${(longLev.imr*100).toFixed(2)}% - MMR ${(longLev.mmr*100).toFixed(2)}% - taker fee 0.05%). Always verify liq price on Blofin before entering.`);
+  if (!longSuit.isOk) {
+    warnMsgs.push(`⛔ Max safe leverage for this stop: ${longSuit.maxSafe}x — your ${lev}x will liquidate before stop is hit`);
+  }
+  if (lev >= 50) {
+    warnMsgs.push(`⚠ At ${lev}x price needs to move only ${longLev.liqDist.toFixed(3)}% to liquidate — use limit orders, never market`);
+  }
+  warnMsgs.push(`Long: entry $${fn(setup.lE, dec)} | stop $${fn(setup.lSL, dec)} | liq $${fn(longLev.liqPrice, dec)}`);
+  warnMsgs.push(`Blofin isolated margin (IMR ${(longLev.imr*100).toFixed(2)}% MMR ${(longLev.mmr*100).toFixed(2)}% fee 0.05%). Always verify on Blofin.`);
   if (warn) warn.innerHTML = warnMsgs.join('<br>');
 }
 
@@ -855,49 +903,60 @@ function renderScanBody(){
 
 async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
   try {
-    // Only fire if score >= 7 OR (pattern confirmed AND score >= 5)
-    const patternConfirmed = ai?.pattern?.confidence === 'high' ||
-      ai?.pattern?.stage === 'confirmed' || ai?.pattern?.stage === 'near breakout';
-    if (sc < 7 && !patternConfirmed) return;
+    // Strict check: score >= 7 AND high confidence AND confirmed/near breakout
+    const patternHighConf = ai?.pattern?.confidence === 'high';
+    const patternReady = ai?.pattern?.stage === 'confirmed' || ai?.pattern?.stage === 'near breakout';
+    if (sc < 7 || !patternHighConf || !patternReady) {
+      console.log(`Alert skipped: score ${sc}/10, pattern ${ai?.pattern?.confidence}/${ai?.pattern?.stage}`);
+      return;
+    }
 
+    // Use pattern entries if available (tighter, better for high leverage)
     const pe = ai?.patternEntry || {};
-    const lE = pe.longEntry || setup.lE;
-    const lSL = pe.longStop || setup.lSL;
-    const lTP1 = pe.longTP1 || setup.lTP1;
-    const lTP2 = pe.longTP2 || setup.lTP2;
-    const sE = pe.shortEntry || setup.sE;
-    const sSL = pe.shortStop || setup.sSL;
-    const sTP1 = pe.shortTP1 || setup.sTP1;
-    const sTP2 = pe.shortTP2 || setup.sTP2;
-    const lRR = lTP1 && lE && lSL ? ((lTP1 - lE) / (lE - lSL)).toFixed(2) : '—';
-    const sRR = sTP1 && sE && sSL ? ((sE - sTP1) / (sSL - sE)).toFixed(2) : '—';
+    const lE  = pe.longEntry  || setup.lE;
+    const lSL = pe.longStop   || setup.lSL;
+    const lTP1= pe.longTP1    || setup.lTP1;
+    const lTP2= pe.longTP2    || setup.lTP2;
+    const sE  = pe.shortEntry || setup.sE;
+    const sSL = pe.shortStop  || setup.sSL;
+    const sTP1= pe.shortTP1   || setup.sTP1;
+    const sTP2= pe.shortTP2   || setup.sTP2;
 
-    const levInfo = calcLeverage(lE, lSL, d.price, activeLev, true);
+    // Blofin leverage calculations
+    const longLev  = calcLeverage(lE, lSL, d.price, activeLev, true);
+    const shortLev = calcLeverage(sE, sSL, d.price, activeLev, false);
 
-    await fetch('/api/alert', {
+    const payload = {
+      coin, tf: activeTF,
+      price: d.price, score: sc,
+      bias: ai?.bias || 'neutral',
+      conviction: ai?.conviction || 'medium',
+      pattern: ai?.pattern?.name || 'None',
+      patternStage: ai?.pattern?.stage || '—',
+      patternConfidence: ai?.pattern?.confidence || 'low',
+      winRate: ai?.pattern?.historicalWinRate || '',
+      longEntry: lE, longStop: lSL, longTP1: lTP1, longTP2: lTP2,
+      shortEntry: sE, shortStop: sSL, shortTP1: sTP1, shortTP2: sTP2,
+      rsi: ta.rsi.toFixed(1), trend: ta.trend,
+      funding: d.funding.toFixed(4), fgValue: d.fgValue,
+      leverage: activeLev,
+      liqLong: longLev.liqPrice,
+      liqShort: shortLev.liqPrice,
+      stopDistPct: longLev.stopDist,
+      maxSafeStopPct: longLev.maxStopPct,
+      longMaxSafeLev: setup.longMaxSafeLev || calcMaxSafeLeverage(lE, lSL),
+      shortMaxSafeLev: setup.shortMaxSafeLev || calcMaxSafeLeverage(sE, sSL),
+      suggestedAction: ai?.suggestedAction || '',
+      watchLevel: ai?.watchLevel || ''
+    };
+
+    const r = await fetch('/api/alert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        coin, tf: activeTF,
-        price: d.price, score: sc,
-        signal: sc >= 7 ? 'Long setup' : 'Watch',
-        bias: ai?.bias || 'neutral',
-        conviction: ai?.conviction || 'medium',
-        pattern: ai?.pattern?.name || 'None',
-        patternStage: ai?.pattern?.stage || '—',
-        patternConfidence: ai?.pattern?.confidence || 'low',
-        winRate: ai?.pattern?.historicalWinRate || '',
-        longEntry: lE, longStop: lSL, longTP1: lTP1, longTP2: lTP2, longRR: lRR,
-        shortEntry: sE, shortStop: sSL, shortTP1: sTP1, shortTP2: sTP2, shortRR: sRR,
-        rsi: ta.rsi.toFixed(1), trend: ta.trend,
-        funding: d.funding.toFixed(4), fgValue: d.fgValue,
-        leverage: activeLev,
-        liqPrice: levInfo.liqPrice,
-        suggestedAction: ai?.suggestedAction || '',
-        watchLevel: ai?.watchLevel || ''
-      })
+      body: JSON.stringify(payload)
     });
-    console.log('Alert sent for', coin);
+    const result = await r.json();
+    console.log('Alert result:', result);
   } catch(e) {
     console.error('Alert error:', e);
   }
