@@ -317,7 +317,7 @@ async function fetchKlines(coin,tf){
   const key=coin+'_'+tf;
   if(klCache[key])return klCache[key];
   // Bybit allows browser CORS — fetch klines directly
-  const intervalMap={'1d':'D','4h':'240','1h':'60','15m':'15'};
+  const intervalMap={'1w':'W','1d':'D','4h':'240','1h':'60','15m':'15','5m':'5'};
   const bybitInterval=intervalMap[tf]||'D';
   try{
     const r=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${COINS[coin].sym}&interval=${bybitInterval}&limit=100`);
@@ -1318,11 +1318,12 @@ async function selectCoin(c){
   activeCoin=c;aiCache={};
   document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading ${c} (${activeMode} mode)...</span></div>`;
   try{
-    const [klines, mtfKlines] = await Promise.all([
-      fetchKlines(c, activeTF),
-      fetchMTFKlines(c)
-    ]);
-    const mtfData = calcMTFAnalysis(mtfKlines);
+    const klines = await fetchKlines(c, activeTF);
+    let mtfData = null;
+    try {
+      const mtfKlines = await fetchMTFKlines(c);
+      mtfData = calcMTFAnalysis(mtfKlines);
+    } catch(e) { console.warn('MTF fetch failed:', e); }
     const scores={};Object.keys(COINS).forEach(cc=>{
       const kl=klCache[cc+'_'+activeTF]||[];
       scores[cc]=scoreSignal(cc,calcTA(kl),null);
@@ -1354,8 +1355,11 @@ async function init(){
     await Promise.allSettled(Object.keys(COINS).filter(c=>c!==activeCoin).map(c=>fetchKlines(c,activeTF)));
     const scores={};Object.keys(COINS).forEach(c=>{scores[c]=scoreSignal(c,calcTA(klCache[c+'_'+activeTF]||[]));});
     renderSidebar(scores);renderAlerts(scores);
-    const mtfKlines = await fetchMTFKlines(activeCoin);
-    const mtfData = calcMTFAnalysis(mtfKlines);
+    let mtfData = null;
+    try {
+      const mtfKlines = await fetchMTFKlines(activeCoin);
+      mtfData = calcMTFAnalysis(mtfKlines);
+    } catch(e) { console.warn('MTF fetch failed:', e); }
     await renderDetail(activeCoin,klines,mtfData);
     document.getElementById('last-upd').textContent='Updated '+new Date().toLocaleTimeString();
   }catch(e){
