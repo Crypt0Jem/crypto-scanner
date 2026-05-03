@@ -21,24 +21,26 @@ export default async function handler(req, res) {
     } = req.body;
 
     // Evaluate confluences for each direction independently
+    const sc = parseInt(score);
     const patternHighConf = patternConfidence === 'high';
+    const patternMedConf  = patternConfidence === 'medium';
     const patternReady    = patternStage === 'confirmed' || patternStage === 'near breakout';
-    const patternOk       = patternHighConf && patternReady;
-    const highScore       = parseInt(score) >= 7;
-
-    // Long confluences: high score + pattern confirmed + AI bias long/neutral
-    const longConfluence  = highScore && patternOk && (bias === 'long' || bias === 'neutral');
-    // Short confluences: high score + pattern confirmed + AI bias short
-    // OR: score >= 5 + pattern confirmed + AI bias short + funding high (overleveraged longs)
-    const shortConfluence = patternOk && (
-      (highScore && bias === 'short') ||
-      (parseInt(score) >= 5 && bias === 'short' && parseFloat(funding) > 0.03)
+    // Pattern OK: high confidence at 7+, OR medium confidence at 8+
+    const patternOk = patternReady && (
+      (sc >= 7 && patternHighConf) ||
+      (sc >= 8 && patternMedConf)
     );
+
+    // Long confluences
+    const longConfluence  = patternOk && (bias === 'long' || bias === 'neutral');
+    // Short confluences: pattern OK + short bias, OR score 5+ short + high funding
+    const shortConfluence = (patternOk && bias === 'short') ||
+      (sc >= 5 && bias === 'short' && patternReady && parseFloat(funding) > 0.03);
 
     if (!longConfluence && !shortConfluence) {
       return res.status(200).json({
         sent: false,
-        reason: `No confluence: score ${score}/10, bias ${bias}, pattern ${patternConfidence}/${patternStage}`
+        reason: `No confluence: score ${sc}/10, pattern ${patternConfidence}/${patternStage} — need (7+/high) or (8+/medium) with confirmed/near breakout`
       });
     }
 
