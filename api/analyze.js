@@ -7,37 +7,17 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
+  if (!apiKey) return res.status(500).json({ error: 'API key not configured on server' });
 
   try {
-    const { coin, price, rsi, trend, funding, fgValue, change24h, atr, oi, support, resistance, tf } = req.body;
+    const { coin, price, rsi, trend, funding, fgValue, change24h, atr, oi, support, resistance, tf, entryMode, optimalLongEntry, optimalShortEntry } = req.body;
 
-    const prompt = `You are a professional crypto trading analyst. Analyze this setup and respond in JSON only.
+    const prompt = `You are a professional crypto trading analyst. Respond in raw JSON only, no markdown, no code blocks.
 
-Coin: ${coin}
-Timeframe: ${tf}
-Current price: $${price}
-24h change: ${change24h}%
-RSI (14): ${rsi}
-Trend (EMA structure): ${trend}
-Funding rate: ${funding}%
-Open Interest: $${oi}B
-Fear & Greed index: ${fgValue}
-ATR: $${atr}
-Key support: $${support}
-Key resistance: $${resistance}
+Coin: ${coin}, Timeframe: ${tf}, Price: $${price}, 24h: ${change24h}%, RSI: ${rsi}, Trend: ${trend}, Funding: ${funding}%, OI: $${oi}B, Fear&Greed: ${fgValue}, ATR: $${atr}, Support: $${support}, Resistance: $${resistance}
 
-Return ONLY this JSON structure (no markdown, no explanation):
-{
-  "conviction": "high" | "medium" | "low",
-  "bias": "long" | "short" | "neutral",
-  "summary": "2-3 sentence analysis of current setup",
-  "longCase": "1-2 sentence bull case",
-  "shortCase": "1-2 sentence bear case",
-  "keyRisk": "single biggest risk to watch",
-  "historicalPattern": "what this setup historically leads to in 1-3 sentences",
-  "suggestedAction": "specific actionable guidance in 1 sentence"
-}`;
+Return ONLY this JSON:
+{"conviction":"high","bias":"long","summary":"your summary","longCase":"bull case","shortCase":"bear case","keyRisk":"key risk","historicalPattern":"pattern","suggestedAction":"action"}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -47,18 +27,18 @@ Return ONLY this JSON structure (no markdown, no explanation):
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 600,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 800,
         messages: [{ role: 'user', content: prompt }]
       })
     });
 
     const data = await response.json();
-    const text = data.content?.map(b => b.text || '').join('') || '';
-    const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
-    res.status(200).json(parsed);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-}
+    if (data.error) return res.status(500).json({ error: data.error.message });
+
+    const text = (data.content || []).map(b => b.text || '').join('').trim();
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1) return res.status(500).json({ error: 'No JSON in response' });
+
+    const parsed = JSON.
