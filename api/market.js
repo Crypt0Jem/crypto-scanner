@@ -10,7 +10,6 @@ export default async function handler(req, res) {
     let data;
 
     if (type === 'tickers') {
-      // Fetch each symbol individually to guarantee array response
       const syms = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
       const results = await Promise.all(
         syms.map(s => fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${s}`).then(r => r.json()))
@@ -18,14 +17,21 @@ export default async function handler(req, res) {
       data = results;
     }
     else if (type === 'klines') {
-      const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit||100}`);
-      data = await r.json();
+      if (!symbol || !interval) return res.status(400).json({ error: 'symbol and interval required' });
+      const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit||100}`;
+      const r = await fetch(url);
+      const raw = await r.json();
+      // Binance returns array of arrays for klines
+      if (!Array.isArray(raw)) return res.status(500).json({ error: 'Unexpected klines response', raw });
+      data = raw;
     }
     else if (type === 'funding') {
+      if (!symbol) return res.status(400).json({ error: 'symbol required' });
       const r = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`);
       data = await r.json();
     }
     else if (type === 'oi') {
+      if (!symbol) return res.status(400).json({ error: 'symbol required' });
       const r = await fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`);
       data = await r.json();
     }
@@ -34,7 +40,7 @@ export default async function handler(req, res) {
       data = await r.json();
     }
     else {
-      return res.status(400).json({ error: 'Unknown type' });
+      return res.status(400).json({ error: 'Unknown type: ' + type });
     }
 
     return res.status(200).json(data);
