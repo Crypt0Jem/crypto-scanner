@@ -179,6 +179,37 @@ body{min-height:100vh}
 .cl-item{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--text3);font-family:var(--mono)}
 .cl-line{width:16px;height:2px;border-radius:1px}
 
+
+/* Mode selector */
+.mode-bar{display:flex;align-items:center;gap:10px;padding:12px 26px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.mode-label{font-size:11px;color:var(--text2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em}
+.mode-btns{display:flex;gap:4px}
+.mode-btn{padding:7px 18px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text2);font-family:var(--mono);font-size:12px;cursor:pointer;transition:all .15s;font-weight:500}
+.mode-btn:hover{border-color:var(--border2);color:var(--text)}
+.mode-btn.active.swing-active{background:rgba(74,158,255,.12);color:var(--blue);border-color:var(--blue-b)}
+.mode-btn.active.scalp-active{background:rgba(245,166,35,.12);color:var(--amber);border-color:var(--amber-b)}
+.mode-desc{font-size:11px;color:var(--text3);font-family:var(--mono)}
+
+/* MTF confluence card */
+.mtf-card{background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:20px;margin-bottom:0}
+.mtf-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.mtf-title{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text2);font-family:var(--mono)}
+.mtf-score-pill{padding:5px 14px;border-radius:99px;font-size:12px;font-weight:600;font-family:var(--mono)}
+.mtf-strong{background:var(--green-bg);color:var(--green);border:1px solid var(--green-b)}
+.mtf-good{background:rgba(74,158,255,.1);color:var(--blue);border:1px solid var(--blue-b)}
+.mtf-mixed{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-b)}
+.mtf-weak{background:var(--red-bg);color:var(--red);border:1px solid var(--red-b)}
+.mtf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+.mtf-tf{background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);text-align:center}
+.mtf-tf-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-family:var(--mono);color:var(--text2);margin-bottom:6px}
+.mtf-tf-trend{font-size:14px;font-weight:600;margin-bottom:4px}
+.mtf-tf-rsi{font-size:10px;font-family:var(--mono);color:var(--text2)}
+.mtf-tf-detail{font-size:10px;font-family:var(--mono);color:var(--text3);margin-top:2px}
+.weekly-filter{border-radius:8px;padding:12px 14px;font-size:12px;font-family:var(--mono);line-height:1.6;margin-top:4px}
+.wf-bull{background:var(--green-bg);border:1px solid var(--green-b);color:var(--green)}
+.wf-bear{background:var(--red-bg);border:1px solid var(--red-b);color:var(--red)}
+.wf-neutral{background:var(--amber-bg);border:1px solid var(--amber-b);color:var(--amber)}
+
 .spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.1);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-full{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:12px;color:var(--text2);font-family:var(--mono);font-size:14px}
@@ -211,6 +242,14 @@ body{min-height:100vh}
     <button class="tf-btn" onclick="selectTF('4h',this)">4H</button>
     <button class="tf-btn" onclick="selectTF('1h',this)">1H</button>
     <button class="tf-btn" onclick="selectTF('15m',this)">15M</button>
+  </div>
+  <div class="sb-label" style="margin-top:4px">Mode</div>
+  <div style="padding:0 10px;margin-bottom:16px">
+    <div style="display:flex;gap:4px">
+      <button class="mode-btn active swing-active" id="mode-swing" onclick="setMode('swing',this)" style="flex:1;font-size:11px;padding:6px 0">📈 Swing</button>
+      <button class="mode-btn" id="mode-scalp" onclick="setMode('scalp',this)" style="flex:1;font-size:11px;padding:6px 0">⚡ Scalp</button>
+    </div>
+    <div class="mode-desc" id="mode-desc" style="margin-top:5px;padding:0 2px">W/D/4H/1H • swing trades</div>
   </div>
   <div class="sb-label">Markets</div>
   <div class="sb-coins" id="coin-list"><div class="loading-full" style="min-height:80px"><div class="spin"></div></div></div>
@@ -247,7 +286,7 @@ const COINS={
 const TF_TV={'1d':'D','4h':'240','1h':'60','15m':'15'};
 const TF_BI={'1d':'1d','4h':'4h','1h':'1h','15m':'15m'};
 
-let activeCoin='BTC',activeTF='1d',entryMode='optimal',activeLev=50;
+let activeCoin='BTC',activeTF='1d',entryMode='optimal',activeLev=50,activeMode='swing';
 let mktData={},klCache={},aiCache={};
 
 const fn=(n,d)=>n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d??0,maximumFractionDigits:d??0});
@@ -387,7 +426,7 @@ function calcSetups(entries,dec){
   return{lE,lSL,lTP1,lTP2,lRisk,lRew,lRR,sE,sSL,sTP1,sTP2,sRisk,sRew,sRR,levAdjustedLong,levAdjustedShort,maxStopPct:maxStopDec*100};
 }
 
-function scoreSignal(coin,ta){
+function scoreSignal(coin,ta,mtf){
   const d=mktData[coin];if(!d)return 0;
   let s=0;
   if(ta.trend==='bullish')s+=2;else if(ta.trend==='mild-bullish')s+=1;
@@ -395,7 +434,15 @@ function scoreSignal(coin,ta){
   if(d.funding<0)s+=2;else if(d.funding<0.01)s+=2;else if(d.funding<0.03)s+=1;
   if(d.fgValue<30)s+=2;else if(d.fgValue<50)s+=1;
   if(d.change24h>0&&d.change24h<4)s+=1;else if(d.change24h>=-2&&d.change24h<0)s+=1;
-  return Math.round((s/8)*10);
+  let base=Math.round((s/8)*10);
+  // MTF confluence adjustment
+  if(mtf){
+    base+=mtf.confluenceScore; // +3 strong, +2 good, +1 partial, -1 conflicted
+    // Counter-trend penalty
+    if(mtf.positionSizeMultiplier<0.5)base=Math.max(0,base-3);
+    else if(mtf.positionSizeMultiplier<1)base=Math.max(0,base-1);
+  }
+  return Math.min(10,Math.max(0,base));
 }
 
 function verdictOf(sc){
@@ -654,7 +701,7 @@ function buildTVChart(coin,tf){
   c.appendChild(s);
 }
 
-async function fetchAI(coin,ta,sc,setup,klines){
+async function fetchAI(coin,ta,sc,setup,klines,mtfData){
   const key=coin+'_'+activeTF+'_'+entryMode;
   if(aiCache[key])return aiCache[key];
   const d=mktData[coin];
@@ -671,6 +718,16 @@ async function fetchAI(coin,ta,sc,setup,klines){
         support:ta.support,resistance:ta.resistance,
         optimalLongEntry:setup.lE,optimalShortEntry:setup.sE,
         entryMode,
+        mode: activeMode,
+        mtfSummary: mtfData ? {
+          confluenceLabel: mtfData.confluenceLabel,
+          confluenceScore: mtfData.confluenceScore,
+          filterStatus: mtfData.filterStatus,
+          filterMsg: mtfData.filterMsg,
+          positionSizeMultiplier: mtfData.positionSizeMultiplier,
+          trendByTF: mtfData.trendSummary,
+          labels: mtfData.stack.labels
+        } : null,
         candles:klines.slice(-50).map(k=>({o:+k.o.toFixed(COINS[coin].dec),h:+k.h.toFixed(COINS[coin].dec),l:+k.l.toFixed(COINS[coin].dec),c:+k.c.toFixed(COINS[coin].dec),v:Math.round(k.v)}))
       })
     });
@@ -679,6 +736,163 @@ async function fetchAI(coin,ta,sc,setup,klines){
     if(json.error)throw new Error(json.error);
     aiCache[key]=json;return json;
   }catch(e){console.error('AI:',e);return null;}
+}
+
+// ── MTF Stack definitions ────────────────────────────────────────────────────
+const MTF_STACKS = {
+  swing: { tfs: ['1w','1d','4h','1h'], labels: ['Weekly','Daily','4H','1H'], entryTF: '1h', desc: 'W/D/4H/1H • swing trades' },
+  scalp: { tfs: ['4h','1h','15m','5m'], labels: ['4H','1H','15M','5M'], entryTF: '5m', desc: '4H/1H/15M/5M • scalp trades' }
+};
+
+function setMode(mode, btn) {
+  activeMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.remove('active','swing-active','scalp-active');
+  });
+  btn.classList.add('active', mode === 'swing' ? 'swing-active' : 'scalp-active');
+  const desc = document.getElementById('mode-desc');
+  if (desc) desc.textContent = MTF_STACKS[mode].desc;
+  // Re-render with new mode
+  aiCache = {};
+  klCache = {};
+  const klines = klCache[activeCoin+'_'+activeTF] || [];
+  selectCoin(activeCoin);
+}
+
+async function fetchMTFKlines(coin) {
+  const stack = MTF_STACKS[activeMode];
+  const results = {};
+  await Promise.allSettled(stack.tfs.map(async tf => {
+    try {
+      results[tf] = await fetchKlines(coin, tf);
+    } catch(e) {
+      results[tf] = [];
+    }
+  }));
+  return results;
+}
+
+function calcMTFAnalysis(mtfKlines) {
+  const stack = MTF_STACKS[activeMode];
+  const analyses = {};
+  stack.tfs.forEach(tf => {
+    const kl = mtfKlines[tf] || [];
+    analyses[tf] = calcTA(kl);
+  });
+
+  // Score confluence
+  let bullCount = 0, bearCount = 0, neutralCount = 0;
+  const trendSummary = {};
+  stack.tfs.forEach(tf => {
+    const t = analyses[tf].trend;
+    trendSummary[tf] = t;
+    if (t === 'bullish' || t === 'mild-bullish') bullCount++;
+    else if (t === 'bearish' || t === 'mild-bearish') bearCount++;
+    else neutralCount++;
+  });
+
+  // Weekly (swing) or 4H (scalp) is the hard filter
+  const filterTF = stack.tfs[0];
+  const filterTA = analyses[filterTF];
+  const filterBull = filterTA.trend === 'bullish' || filterTA.trend === 'mild-bullish';
+  const filterBear = filterTA.trend === 'bearish' || filterTA.trend === 'mild-bearish';
+
+  // Confluence score
+  const total = stack.tfs.length;
+  let confluenceScore, confluenceLabel, confluenceClass;
+  const maxAgree = Math.max(bullCount, bearCount);
+
+  if (maxAgree === total) { confluenceScore = 3; confluenceLabel = `Strong ${bullCount > bearCount ? 'Bull' : 'Bear'} (${total}/${total})`; confluenceClass = bullCount > bearCount ? 'mtf-strong' : 'mtf-weak'; }
+  else if (maxAgree >= total - 1) { confluenceScore = 2; confluenceLabel = `Good ${bullCount > bearCount ? 'Bull' : 'Bear'} (${maxAgree}/${total})`; confluenceClass = bullCount > bearCount ? 'mtf-good' : 'mtf-mixed'; }
+  else if (maxAgree >= Math.ceil(total / 2)) { confluenceScore = 1; confluenceLabel = `Partial (${maxAgree}/${total})`; confluenceClass = 'mtf-mixed'; }
+  else { confluenceScore = -1; confluenceLabel = `Conflicted (${maxAgree}/${total})`; confluenceClass = 'mtf-weak'; }
+
+  // Weekly/top TF filter result
+  let filterStatus, filterClass, filterMsg, positionSizeMultiplier;
+  if (filterBull && bullCount > bearCount) {
+    filterStatus = '✅ Trend aligned — full position size';
+    filterClass = 'wf-bull';
+    filterMsg = `${stack.labels[0]} is ${filterTA.trend} — trade WITH the trend`;
+    positionSizeMultiplier = 1.0;
+  } else if (filterBear && bearCount > bullCount) {
+    filterStatus = '✅ Trend aligned — full position size';
+    filterClass = 'wf-bear';
+    filterMsg = `${stack.labels[0]} is ${filterTA.trend} — trade WITH the trend`;
+    positionSizeMultiplier = 1.0;
+  } else if (filterBull && bearCount > bullCount) {
+    filterStatus = '⚠ Counter-trend — reduce size 50%';
+    filterClass = 'wf-bear';
+    filterMsg = `${stack.labels[0]} bullish but lower TFs bearish — counter-trend risk`;
+    positionSizeMultiplier = 0.5;
+  } else if (filterBear && bullCount > bearCount) {
+    filterStatus = '⛔ Counter-trend — avoid at high leverage';
+    filterClass = 'wf-bear';
+    filterMsg = `${stack.labels[0]} bearish — long setups are counter-trend, high failure rate`;
+    positionSizeMultiplier = 0.25;
+  } else {
+    filterStatus = '🟡 Neutral — wait for trend clarity';
+    filterClass = 'wf-neutral';
+    filterMsg = `${stack.labels[0]} is neutral — no clear institutional bias`;
+    positionSizeMultiplier = 0.5;
+  }
+
+  // Entry TF analysis for precise entry
+  const entryTA = analyses[stack.entryTF] || analyses[stack.tfs[stack.tfs.length - 1]];
+
+  return {
+    analyses, trendSummary,
+    bullCount, bearCount, neutralCount,
+    confluenceScore, confluenceLabel, confluenceClass,
+    filterStatus, filterClass, filterMsg, positionSizeMultiplier,
+    filterTA, entryTA, stack
+  };
+}
+
+function renderMTFCard(mtf, dec) {
+  if (!mtf) return '<div class="mtf-card"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">MTF data loading...</div></div>';
+
+  const trendColor = t => {
+    if (t === 'bullish') return 'var(--green)';
+    if (t === 'mild-bullish') return '#7de0b0';
+    if (t === 'mild-bearish') return 'var(--amber)';
+    if (t === 'bearish') return 'var(--red)';
+    return 'var(--text2)';
+  };
+  const trendShort = t => {
+    if (t === 'bullish') return '▲ Bullish';
+    if (t === 'mild-bullish') return '↗ Mild Bull';
+    if (t === 'mild-bearish') return '↘ Mild Bear';
+    if (t === 'bearish') return '▼ Bearish';
+    return '→ Neutral';
+  };
+
+  const tfCells = mtf.stack.tfs.map((tf, i) => {
+    const ta = mtf.analyses[tf] || {};
+    const isFilter = i === 0;
+    const isEntry = i === mtf.stack.tfs.length - 1;
+    return `<div class="mtf-tf" style="${isFilter ? 'border-color:var(--border2);border-width:2px' : ''}${isEntry ? ';border-style:dashed' : ''}">
+      <div class="mtf-tf-label">${mtf.stack.labels[i]}${isFilter ? ' 🔒' : ''}${isEntry ? ' 🎯' : ''}</div>
+      <div class="mtf-tf-trend" style="color:${trendColor(ta.trend)}">${trendShort(ta.trend)}</div>
+      <div class="mtf-tf-rsi">RSI: ${ta.rsi ? ta.rsi.toFixed(1) : '—'}</div>
+      <div class="mtf-tf-detail">EMA: ${ta.ema20 ? '$'+fn(ta.ema20, dec>2?2:dec) : '—'}</div>
+    </div>`;
+  }).join('');
+
+  const posSize = mtf.positionSizeMultiplier;
+  const posSizeColor = posSize >= 1 ? 'var(--green)' : posSize >= 0.5 ? 'var(--amber)' : 'var(--red)';
+
+  return `<div class="mtf-card full">
+    <div class="mtf-header">
+      <span class="mtf-title">Multi-timeframe confluence — ${activeMode === 'swing' ? 'Swing' : 'Scalp'} mode</span>
+      <span class="mtf-score-pill ${mtf.confluenceClass}">${mtf.confluenceLabel}</span>
+    </div>
+    <div class="mtf-grid">${tfCells}</div>
+    <div class="weekly-filter ${mtf.filterClass}">
+      <strong>${mtf.filterStatus}</strong><br>
+      ${mtf.filterMsg}<br>
+      <span style="opacity:.8">Position size multiplier: <strong style="color:${posSizeColor}">${(posSize*100).toFixed(0)}% of normal</strong>${posSize < 1 ? ' — ' + (activeMode==='swing'?'Weekly':'4H') + ' filter reducing risk' : ''}</span>
+    </div>
+  </div>`;
 }
 
 function renderSidebar(scores){
@@ -702,11 +916,11 @@ function renderAlerts(scores){
   el.innerHTML=`<div class="alerts-bar"><span class="alert-lbl">High conviction</span>${fired.map(([c,sc])=>`<span class="alert-item">${c} — ${sc}/10 Long setup</span>`).join('')}</div>`;
 }
 
-async function renderDetail(coin,klines){
+async function renderDetail(coin,klines,mtfData){
   const d=mktData[coin];
   const dec=COINS[coin].dec;
   const ta=calcTA(klines);
-  const sc=scoreSignal(coin,ta);
+  const sc=scoreSignal(coin,ta,mtfData);
   const v=verdictOf(sc);
   const entries=calcEntries(d.price,ta,dec);
   const setup=calcSetups(entries,dec);
@@ -797,6 +1011,9 @@ async function renderDetail(coin,klines){
         <div class="lev-grid" id="lev-grid"></div>
         <div class="liq-warning" id="lev-warning-text"></div>
       </div>
+
+      <!-- MTF Confluence -->
+      \${mtfData ? renderMTFCard(mtfData, dec) : ''}
 
       <!-- Long setup -->
       <div class="card" style="border-left:3px solid var(--green)">
@@ -906,7 +1123,7 @@ async function renderDetail(coin,klines){
     setTimeout(()=>buildCustomChart(klines,setup,dec,activeLev),50);
   },100);
   renderScanBody();
-  loadAI(coin,ta,sc,setup,klines);
+  loadAI(coin,ta,sc,setup,klines,mtfData);
 }
 
 function renderScanBody(){
@@ -997,8 +1214,8 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
   }
 }
 
-async function loadAI(coin,ta,sc,setup,klines){
-  const ai=await fetchAI(coin,ta,sc,setup,klines);
+async function loadAI(coin,ta,sc,setup,klines,mtfData){
+  const ai=await fetchAI(coin,ta,sc,setup,klines,mtfData);
   const patternEl=document.getElementById('pattern-section');
   const aiEl=document.getElementById('ai-section');
   const lNote=document.getElementById('pattern-long-note');
@@ -1068,33 +1285,50 @@ async function loadAI(coin,ta,sc,setup,klines){
   const cCol=ai.conviction==='high'?'var(--green)':ai.conviction==='medium'?'var(--amber)':'var(--text3)';
   const bCol=ai.bias==='long'?'var(--green)':ai.bias==='short'?'var(--red)':'var(--text3)';
   if(aiEl){
+    const counterWarn = ai.counterTrend && ai.counterTrendWarning
+      ? `<div style="background:rgba(255,77,77,.15);border:1px solid var(--red-b);border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:var(--red)">⛔ Counter-trend warning: ${ai.counterTrendWarning}</div>`
+      : '';
+    const mtfVerdict = ai.mtfVerdict
+      ? `<div style="background:rgba(74,158,255,.08);border:1px solid var(--blue-b);border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:var(--blue)">📊 MTF: ${ai.mtfVerdict}</div>`
+      : '';
+    const posNote = ai.positionSizeNote
+      ? `<div style="background:rgba(245,166,35,.08);border:1px solid var(--amber-b);border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);font-family:var(--mono)">💰 Position size: ${ai.positionSizeNote}</div>`
+      : '';
     aiEl.innerHTML=`
-      <div class="card-title" style="color:var(--blue)">AI analysis — Claude
-        <span style="margin-left:10px;font-size:8px;color:${cCol}">CONVICTION: ${(ai.conviction||'').toUpperCase()}</span>
-        <span style="margin-left:8px;font-size:8px;color:${bCol}">BIAS: ${(ai.bias||'').toUpperCase()}</span>
+      <div class="card-title" style="color:var(--blue)">AI analysis — Claude (${activeMode} mode)
+        <span style="margin-left:10px;font-size:9px;color:${cCol}">CONVICTION: ${(ai.conviction||'').toUpperCase()}</span>
+        <span style="margin-left:8px;font-size:9px;color:${bCol}">BIAS: ${(ai.bias||'').toUpperCase()}</span>
+        ${ai.counterTrend ? '<span style="margin-left:8px;font-size:9px;background:rgba(255,77,77,.2);color:var(--red);padding:2px 6px;border-radius:3px">⛔ COUNTER-TREND</span>' : ''}
       </div>
+      ${counterWarn}
+      ${mtfVerdict}
       <p class="ai-summary">${ai.summary||''}</p>
       <div class="ai-2col">
         <div class="ai-block"><div class="ai-btitle" style="color:var(--green)">Bull case</div><div class="ai-btext">${ai.longCase||'—'}</div></div>
         <div class="ai-block"><div class="ai-btitle" style="color:var(--red)">Bear case</div><div class="ai-btext">${ai.shortCase||'—'}</div></div>
       </div>
+      ${posNote}
       <div class="ai-risk">Key risk: ${ai.keyRisk||'—'}</div>
       <div class="ai-action">Suggested action: ${ai.suggestedAction||'—'}</div>
       <div class="ai-pattern-hist">Historical pattern context: ${ai.historicalPattern||'—'}</div>
     `;
   }
-  // Fire Telegram alert if signals align
-  sendTelegramAlert(coin, ta, sc, setup, ai, mktData[coin], COINS[coin].dec);
-}
 
 async function selectCoin(c){
   activeCoin=c;aiCache={};
-  document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading ${c}...</span></div>`;
+  document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading ${c} (${activeMode} mode)...</span></div>`;
   try{
-    const klines=await fetchKlines(c,activeTF);
-    const scores={};Object.keys(COINS).forEach(cc=>{scores[cc]=scoreSignal(cc,calcTA(klCache[cc+'_'+activeTF]||[]));});
+    const [klines, mtfKlines] = await Promise.all([
+      fetchKlines(c, activeTF),
+      fetchMTFKlines(c)
+    ]);
+    const mtfData = calcMTFAnalysis(mtfKlines);
+    const scores={};Object.keys(COINS).forEach(cc=>{
+      const kl=klCache[cc+'_'+activeTF]||[];
+      scores[cc]=scoreSignal(cc,calcTA(kl),null);
+    });
     renderSidebar(scores);renderAlerts(scores);
-    await renderDetail(c,klines);
+    await renderDetail(c,klines,mtfData);
   }catch(e){document.getElementById('main-content').innerHTML=`<div class="loading-full"><span style="color:var(--red)">Error: ${e.message}</span></div>`;}
 }
 
@@ -1120,7 +1354,9 @@ async function init(){
     await Promise.allSettled(Object.keys(COINS).filter(c=>c!==activeCoin).map(c=>fetchKlines(c,activeTF)));
     const scores={};Object.keys(COINS).forEach(c=>{scores[c]=scoreSignal(c,calcTA(klCache[c+'_'+activeTF]||[]));});
     renderSidebar(scores);renderAlerts(scores);
-    await renderDetail(activeCoin,klines);
+    const mtfKlines = await fetchMTFKlines(activeCoin);
+    const mtfData = calcMTFAnalysis(mtfKlines);
+    await renderDetail(activeCoin,klines,mtfData);
     document.getElementById('last-upd').textContent='Updated '+new Date().toLocaleTimeString();
   }catch(e){
     document.getElementById('main-content').innerHTML=`<div class="loading-full"><span style="color:var(--red);font-family:var(--mono);font-size:12px">Error: ${e.message}</span></div>`;
