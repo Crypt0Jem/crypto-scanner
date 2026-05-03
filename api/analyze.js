@@ -25,21 +25,30 @@ export default async function handler(req, res) {
     // Format MTF summary
     let liqStr = '';
     if (liqZones) {
+      const lse = liqZones.longSweepEntry;
+      const sse = liqZones.shortSweepEntry;
       liqStr = `
-## Estimated Liquidation Zones
+## Estimated Liquidation Zones & Sweep Entries
 Market bias: ${liqZones.fundingBias}
-Long liquidation cluster (10x-50x longs get wiped): ${liqZones.majorLongCluster}
-Short liquidation cluster (10x-50x shorts get wiped): ${liqZones.majorShortCluster}
+Long liq cluster (10x-50x longs): ${liqZones.majorLongCluster}
+Short liq cluster (10x-50x shorts): ${liqZones.majorShortCluster}
 Nearest long sweep target: $${liqZones.nearestLongSweep} (125x longs)
 Nearest short squeeze target: $${liqZones.nearestShortSweep} (125x shorts)
-High-significance long liq levels: $${liqZones.topLongLiq}
-High-significance short liq levels: $${liqZones.topShortLiq}
+
+## Liquidity Sweep Entry Setups (pre-calculated)
+LONG SWEEP ENTRY (enter after long liq zone is swept):
+  Entry: $${lse?.entry} | Stop: $${lse?.stop} | TP1: $${lse?.tp1} | TP2: $${lse?.tp2} | TP3: $${lse?.tp3}
+  Logic: ${lse?.logic}
+
+SHORT SWEEP ENTRY (enter after short liq zone is squeezed):
+  Entry: $${sse?.entry} | Stop: $${sse?.stop} | TP1: $${sse?.tp1} | TP2: $${sse?.tp2} | TP3: $${sse?.tp3}
+  Logic: $${sse?.logic}
 
 Use this data to:
-1. Identify likely liquidity sweep targets before real moves
-2. Avoid placing stops at obvious liquidation levels
-3. Target entries near major liq clusters (price magnets)
-4. Flag if current price is near a major cluster (reversal risk)
+1. Evaluate if the sweep entries align with the chart pattern
+2. Flag if price is approaching a liq cluster (imminent sweep risk)
+3. Recommend sweep entry vs pattern entry based on market structure
+4. Note which sweep entry has higher conviction given current trend + MTF
 `;
     }
 
