@@ -290,17 +290,49 @@ let activeCoin='BTC',activeTF='1d',entryMode='optimal',activeLev=50,activeMode='
 let mktData={},klCache={},aiCache={};
 
 const fn=(n,d)=>n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d??0,maximumFractionDigits:d??0});
+
+// Fetch with timeout
+async function fetchWithTimeout(url, ms=8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  } catch(e) {
+    clearTimeout(id);
+    throw e;
+  }
+}
 const fp=n=>(n>=0?'+':'')+Number(n).toFixed(2)+'%';
 
 async function api(params){
   const qs=new URLSearchParams(params).toString();
-  const r=await fetch(`/api/market?${qs}`);
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  return r.json();
+  return fetchWithTimeout(`/api/market?${qs}`, 10000);
 }
 
 async function fetchMarket(){
-  const tickers=await api({type:'tickers'});
+  let tickers=[];
+  try{ tickers=await api({type:'tickers'}); }
+  catch(e){ console.error('Tickers failed:',e); }
+  if(!Array.isArray(tickers)||!tickers.length){
+    // Fallback: use Bybit directly from browser
+    try{
+      const syms=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
+      const results=await Promise.allSettled(syms.map(s=>
+        fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`,6000)
+      ));
+      tickers=results.map((r,i)=>{
+        if(r.status!=='fulfilled')return null;
+        const t=r.value?.result?.list?.[0];
+        if(!t)return null;
+        const price=parseFloat(t.lastPrice);
+        const open24=parseFloat(t.prevPrice24h);
+        return{symbol:syms[i],lastPrice:t.lastPrice,priceChangePercent:open24?((price-open24)/open24*100).toFixed(4):'0',highPrice:t.highPrice24h,lowPrice:t.lowPrice24h,quoteVolume:t.turnover24h};
+      }).filter(Boolean);
+    }catch(e2){ console.error('Bybit fallback also failed:',e2); }
+  }
   tickers.forEach(t=>{
     const coin=Object.keys(COINS).find(c=>COINS[c].sym===t.symbol);
     if(!coin)return;
@@ -320,7 +352,7 @@ async function fetchKlines(coin,tf){
   const intervalMap={'1w':'W','1d':'D','4h':'240','1h':'60','15m':'15','5m':'5'};
   const bybitInterval=intervalMap[tf]||'D';
   try{
-    const r=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${COINS[coin].sym}&interval=${bybitInterval}&limit=100`);
+    const r=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${COINS[coin].sym}&interval=${bybitInterval}&limit=100`,{signal:AbortSignal.timeout(8000)});
     const j=await r.json();
     const list=j?.result?.list;
     if(Array.isArray(list)&&list.length>0){
@@ -764,8 +796,12 @@ async function fetchMTFKlines(coin) {
   const results = {};
   await Promise.allSettled(stack.tfs.map(async tf => {
     try {
-      results[tf] = await fetchKlines(coin, tf);
+      results[tf] = await Promise.race([
+        fetchKlines(coin, tf),
+        new Promise((_,reject) => setTimeout(() => reject(new Error('MTF timeout')), 7000))
+      ]);
     } catch(e) {
+      console.warn('MTF klines failed for', tf, e.message);
       results[tf] = [];
     }
   }));
