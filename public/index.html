@@ -157,6 +157,28 @@ body{min-height:100vh}
 .smtrack{width:44px;height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden}
 .smfill{height:100%;border-radius:2px}
 
+
+/* Leverage selector */
+.lev-section{padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.lev-label{font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:var(--text3);font-family:var(--mono);margin-bottom:5px}
+.lev-row{display:flex;gap:3px;flex-wrap:wrap}
+.lev-btn{padding:4px 7px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:var(--mono);font-size:9px;cursor:pointer;transition:all .12s}
+.lev-btn:hover{color:var(--text2);border-color:var(--border2)}
+.lev-btn.active{background:rgba(255,77,77,0.15);color:var(--red);border-color:var(--red-b);font-weight:500}
+/* Leverage info card */
+.lev-card{background:rgba(255,77,77,0.05);border:1px solid var(--red-b);border-radius:10px;padding:14px;margin-bottom:0}
+.lev-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}
+.lev-item{background:var(--bg3);border-radius:6px;padding:8px 10px;border:1px solid var(--border)}
+.lev-item .li-label{font-size:8px;text-transform:uppercase;letter-spacing:.1em;font-family:var(--mono);color:var(--text3);margin-bottom:3px}
+.lev-item .li-val{font-family:var(--mono);font-size:12px;font-weight:500}
+.liq-warning{background:rgba(255,77,77,0.1);border:1px solid var(--red-b);border-radius:6px;padding:7px 10px;margin-top:8px;font-size:10px;color:var(--red);font-family:var(--mono);line-height:1.5}
+/* Custom chart */
+.chart-canvas-wrap{position:relative;width:100%;height:420px;background:var(--bg3);border-radius:7px;overflow:hidden}
+#custom-chart{width:100%;height:100%}
+.chart-legend{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.cl-item{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--text3);font-family:var(--mono)}
+.cl-line{width:16px;height:2px;border-radius:1px}
+
 .spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.1);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-full{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:10px;color:var(--text3);font-family:var(--mono);font-size:12px}
@@ -192,6 +214,18 @@ body{min-height:100vh}
   </div>
   <div class="sb-label">Markets</div>
   <div class="sb-coins" id="coin-list"><div class="loading-full" style="min-height:80px"><div class="spin"></div></div></div>
+  <div class="lev-section" style="margin-top:auto">
+    <div class="lev-label">Leverage</div>
+    <div class="lev-row">
+      <button class="lev-btn" onclick="setLev(1,this)">1x</button>
+      <button class="lev-btn" onclick="setLev(10,this)">10x</button>
+      <button class="lev-btn" onclick="setLev(25,this)">25x</button>
+      <button class="lev-btn active" onclick="setLev(50,this)">50x</button>
+      <button class="lev-btn" onclick="setLev(75,this)">75x</button>
+      <button class="lev-btn" onclick="setLev(100,this)">100x</button>
+      <button class="lev-btn" onclick="setLev(125,this)">125x</button>
+    </div>
+  </div>
   <button class="rbtn" id="rbtn" onclick="init()">↻ Refresh all data</button>
   <div class="last-upd" id="last-upd">—</div>
 </aside>
@@ -213,7 +247,7 @@ const COINS={
 const TF_TV={'1d':'D','4h':'240','1h':'60','15m':'15'};
 const TF_BI={'1d':'1d','4h':'4h','1h':'1h','15m':'15m'};
 
-let activeCoin='BTC',activeTF='1d',entryMode='optimal';
+let activeCoin='BTC',activeTF='1d',entryMode='optimal',activeLev=50;
 let mktData={},klCache={},aiCache={};
 
 const fn=(n,d)=>n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d??0,maximumFractionDigits:d??0});
@@ -339,6 +373,180 @@ function verdictOf(sc){
   return{text:'Short bias',cls:'cbs'};
 }
 
+function setLev(lev,btn){
+  activeLev=lev;
+  document.querySelectorAll('.lev-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  // Re-render detail if data loaded
+  const klines=klCache[activeCoin+'_'+activeTF]||[];
+  if(klines.length&&mktData[activeCoin]?.price){
+    renderDetail(activeCoin,klines);
+  }
+}
+
+function calcLeverage(entry,stop,price,lev,isLong){
+  const stopDist=Math.abs(entry-stop)/entry*100;
+  const liqDist=(1/lev)*100*0.9; // ~90% of margin = liquidation
+  const maxStopForLev=liqDist*0.7; // use 70% of liq distance for stop
+  const effectiveStop=Math.min(stopDist,maxStopForLev);
+  const liqPrice=isLong
+    ? +(entry*(1-liqDist/100)).toFixed(8)
+    : +(entry*(1+liqDist/100)).toFixed(8);
+  // Recommended position size: risk 1-2% of account
+  const riskPct=1; // risk 1% of account per trade
+  const positionSizeUSDT=riskPct/(stopDist/100)*lev; // as % of account
+  const marginRequired=100/lev; // % of position as margin
+  const warningLevel=lev>=75?'extreme':lev>=50?'high':lev>=25?'medium':'low';
+  return{stopDist,liqDist,liqPrice,effectiveStop,positionSizeUSDT,marginRequired,warningLevel,maxStopPct:maxStopForLev};
+}
+
+function buildCustomChart(klines, setup, dec, lev) {
+  const canvas = document.getElementById('custom-chart');
+  if (!canvas || !klines || klines.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const wrap = canvas.parentElement;
+  canvas.width = wrap.clientWidth * dpr;
+  canvas.height = wrap.clientHeight * dpr;
+  canvas.style.width = wrap.clientWidth + 'px';
+  canvas.style.height = wrap.clientHeight + 'px';
+  ctx.scale(dpr, dpr);
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const PAD = { t: 20, r: 70, b: 30, l: 10 };
+  const cW = W - PAD.l - PAD.r, cH = H - PAD.t - PAD.b;
+
+  // Show last 60 candles
+  const data = klines.slice(-60);
+  const allPrices = [
+    ...data.map(k => k.h), ...data.map(k => k.l),
+    setup.lE, setup.lSL, setup.lTP2, setup.sE, setup.sSL, setup.sTP2,
+    setup.lLiq || 0, setup.sLiq || 0
+  ].filter(Boolean);
+  const minP = Math.min(...allPrices) * 0.998;
+  const maxP = Math.max(...allPrices) * 1.002;
+  const range = maxP - minP;
+
+  const xScale = i => PAD.l + (i / (data.length - 1)) * cW;
+  const yScale = p => PAD.t + (1 - (p - minP) / range) * cH;
+  const candleW = Math.max(2, (cW / data.length) * 0.7);
+
+  // Background
+  ctx.fillStyle = '#181818';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = PAD.t + (i / 5) * cH;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
+    const price = maxP - (i / 5) * range;
+    ctx.fillStyle = '#444';
+    ctx.font = '9px DM Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('$' + price.toFixed(dec > 2 ? 2 : dec), W - PAD.r + 4, y + 3);
+  }
+
+  // Draw level lines
+  function drawLevel(price, color, label, dash = []) {
+    if (!price || price <= 0) return;
+    const y = yScale(price);
+    if (y < PAD.t - 5 || y > H - PAD.b + 5) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.font = 'bold 9px DM Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, W - PAD.r + 4, y + 3);
+    ctx.restore();
+  }
+
+  drawLevel(setup.lTP2, '#00d084', 'TP2', [4,3]);
+  drawLevel(setup.lTP1, '#00d084', 'TP1', [4,3]);
+  drawLevel(setup.lE, '#4a9eff', 'L.Entry', [6,2]);
+  drawLevel(setup.sE, '#f5a623', 'S.Entry', [6,2]);
+  drawLevel(setup.lSL, '#ff4d4d', 'L.Stop', [3,3]);
+  drawLevel(setup.sSL, '#ff4d4d', 'S.Stop', [3,3]);
+  if (setup.lLiq) drawLevel(setup.lLiq, 'rgba(255,77,77,0.4)', 'L.Liq', [2,4]);
+  if (setup.sLiq) drawLevel(setup.sLiq, 'rgba(255,77,77,0.4)', 'S.Liq', [2,4]);
+
+  // Draw candles
+  data.forEach((k, i) => {
+    const x = xScale(i);
+    const isUp = k.c >= k.o;
+    const color = isUp ? '#00d084' : '#ff4d4d';
+    const yH = yScale(k.h), yL = yScale(k.l);
+    const yO = yScale(k.o), yC = yScale(k.c);
+
+    // Wick
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, yH); ctx.lineTo(x, yL);
+    ctx.stroke();
+
+    // Body
+    ctx.fillStyle = color;
+    const bodyTop = Math.min(yO, yC);
+    const bodyH = Math.max(1, Math.abs(yC - yO));
+    ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+  });
+
+  // Current price line
+  const lastClose = data[data.length - 1].c;
+  const y = yScale(lastClose);
+  ctx.strokeStyle = '#4a9eff';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 2]);
+  ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function buildLevCard(price, setup, lev, dec) {
+  const longLev = calcLeverage(setup.lE, setup.lSL, price, lev, true);
+  const shortLev = calcLeverage(setup.sE, setup.sSL, price, lev, false);
+
+  // Update setup with liquidation prices
+  setup.lLiq = longLev.liqPrice;
+  setup.sLiq = shortLev.liqPrice;
+
+  const grid = document.getElementById('lev-grid');
+  const warn = document.getElementById('lev-warning-text');
+  const badge = document.getElementById('lev-warning-badge');
+  if (!grid) return;
+
+  const riskColor = lev >= 75 ? 'var(--red)' : lev >= 25 ? 'var(--amber)' : 'var(--green)';
+  if (badge) {
+    badge.textContent = lev >= 75 ? 'EXTREME RISK' : lev >= 25 ? 'HIGH RISK' : 'MODERATE';
+    badge.style.background = lev >= 75 ? 'rgba(255,77,77,.25)' : lev >= 25 ? 'rgba(245,166,35,.2)' : 'rgba(0,208,132,.15)';
+    badge.style.color = riskColor;
+  }
+
+  grid.innerHTML = `
+    <div class="lev-item"><div class="li-label">Leverage</div><div class="li-val" style="color:${riskColor}">${lev}x</div></div>
+    <div class="lev-item"><div class="li-label">Margin needed</div><div class="li-val">${(100/lev).toFixed(2)}% of pos</div></div>
+    <div class="lev-item"><div class="li-label">Long liq price</div><div class="li-val" style="color:var(--red)">$${fn(longLev.liqPrice, dec)}</div></div>
+    <div class="lev-item"><div class="li-label">Short liq price</div><div class="li-val" style="color:var(--red)">$${fn(shortLev.liqPrice, dec)}</div></div>
+    <div class="lev-item"><div class="li-label">Long stop dist</div><div class="li-val">${longLev.stopDist.toFixed(2)}%</div></div>
+    <div class="lev-item"><div class="li-label">Max safe stop</div><div class="li-val" style="color:${longLev.stopDist > longLev.maxStopPct ? 'var(--red)':'var(--green)'}">${longLev.maxStopPct.toFixed(2)}%</div></div>
+    <div class="lev-item"><div class="li-label">Rec. position size</div><div class="li-val vg">${(longLev.positionSizeUSDT).toFixed(1)}% of account</div></div>
+    <div class="lev-item"><div class="li-label">Stop vs liq</div><div class="li-val" style="color:${longLev.stopDist < longLev.liqDist ? 'var(--green)':'var(--red)'}">${longLev.stopDist < longLev.liqDist ? 'Safe ✓' : 'Stop beyond liq ✗'}</div></div>
+  `;
+
+  const stopSafe = longLev.stopDist < longLev.liqDist;
+  const warnMsgs = [];
+  if (!stopSafe) warnMsgs.push(`⚠ Stop loss (${longLev.stopDist.toFixed(2)}%) is beyond liquidation (${longLev.liqDist.toFixed(2)}%) — reduce leverage or widen stop`);
+  if (lev >= 75) warnMsgs.push(`⚠ At ${lev}x, price only needs to move ${longLev.liqDist.toFixed(2)}% against you to liquidate — use limit orders only`);
+  if (lev >= 50) warnMsgs.push(`Position size rec: ${(longLev.positionSizeUSDT).toFixed(1)}% of account risking 1% per trade — never risk more than 2%`);
+  warnMsgs.push(`Long entry: $${fn(setup.lE, dec)} | Stop: $${fn(setup.lSL, dec)} | Liq: $${fn(longLev.liqPrice, dec)}`);
+
+  if (warn) warn.innerHTML = warnMsgs.join('<br>');
+}
+
 function buildTVChart(coin,tf){
   const c=document.getElementById('tv-chart');if(!c)return;
   c.innerHTML='';
@@ -462,10 +670,35 @@ async function renderDetail(coin,klines){
 
     <div class="content">
 
-      <!-- TradingView -->
+      <!-- Charts: TradingView + Custom with levels -->
       <div class="card full">
         <div class="card-title">Live chart — TradingView (${activeTF} candlesticks)</div>
         <div class="tv-wrap"><div class="tradingview-widget-container" id="tv-chart" style="height:100%;width:100%"></div></div>
+      </div>
+
+      <!-- Custom chart with auto levels -->
+      <div class="card full">
+        <div class="card-title">Trade levels chart — entry, stops & targets drawn automatically</div>
+        <div class="chart-legend">
+          <span class="cl-item"><span class="cl-line" style="background:#4a9eff"></span>Price</span>
+          <span class="cl-item"><span class="cl-line" style="background:#00d084;border-top:2px dashed #00d084"></span>Long entry</span>
+          <span class="cl-item"><span class="cl-line" style="background:#ff4d4d;border-top:2px dashed #ff4d4d"></span>Stop loss</span>
+          <span class="cl-item"><span class="cl-line" style="background:#00d084"></span>TP1 / TP2</span>
+          <span class="cl-item"><span class="cl-line" style="background:#f5a623"></span>Short entry</span>
+          <span class="cl-item"><span class="cl-line" style="background:#ff4d4d;opacity:.5"></span>Liquidation</span>
+        </div>
+        <div class="chart-canvas-wrap">
+          <canvas id="custom-chart" role="img" aria-label="${coin} price chart with trade levels drawn"></canvas>
+        </div>
+      </div>
+
+      <!-- Leverage card -->
+      <div class="lev-card full" id="lev-card">
+        <div class="card-title" style="color:var(--red)">Leverage analysis — ${activeLev}x
+          <span id="lev-warning-badge" style="margin-left:8px;font-size:8px;padding:2px 8px;border-radius:3px;background:rgba(255,77,77,.2);color:var(--red)">HIGH RISK</span>
+        </div>
+        <div class="lev-grid" id="lev-grid"></div>
+        <div class="liq-warning" id="lev-warning-text"></div>
       </div>
 
       <!-- Long setup -->
@@ -567,6 +800,12 @@ async function renderDetail(coin,klines){
   `;
 
   buildTVChart(coin,activeTF);
+  setTimeout(()=>{
+    buildCustomChart(klines,setup,dec,activeLev);
+    buildLevCard(d.price,setup,activeLev,dec);
+    // redraw custom chart after lev card updates setup with liq prices
+    setTimeout(()=>buildCustomChart(klines,setup,dec,activeLev),50);
+  },100);
   renderScanBody();
   loadAI(coin,ta,sc,setup,klines);
 }
@@ -595,6 +834,56 @@ function renderScanBody(){
       <td><span class="cbadge ${v.cls}">${v.text}</span></td>
     </tr>`;
   }).join('');
+}
+
+async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
+  try {
+    // Only fire if score >= 7 OR (pattern confirmed AND score >= 5)
+    const patternConfirmed = ai?.pattern?.confidence === 'high' ||
+      ai?.pattern?.stage === 'confirmed' || ai?.pattern?.stage === 'near breakout';
+    if (sc < 7 && !patternConfirmed) return;
+
+    const pe = ai?.patternEntry || {};
+    const lE = pe.longEntry || setup.lE;
+    const lSL = pe.longStop || setup.lSL;
+    const lTP1 = pe.longTP1 || setup.lTP1;
+    const lTP2 = pe.longTP2 || setup.lTP2;
+    const sE = pe.shortEntry || setup.sE;
+    const sSL = pe.shortStop || setup.sSL;
+    const sTP1 = pe.shortTP1 || setup.sTP1;
+    const sTP2 = pe.shortTP2 || setup.sTP2;
+    const lRR = lTP1 && lE && lSL ? ((lTP1 - lE) / (lE - lSL)).toFixed(2) : '—';
+    const sRR = sTP1 && sE && sSL ? ((sE - sTP1) / (sSL - sE)).toFixed(2) : '—';
+
+    const levInfo = calcLeverage(lE, lSL, d.price, activeLev, true);
+
+    await fetch('/api/alert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        coin, tf: activeTF,
+        price: d.price, score: sc,
+        signal: sc >= 7 ? 'Long setup' : 'Watch',
+        bias: ai?.bias || 'neutral',
+        conviction: ai?.conviction || 'medium',
+        pattern: ai?.pattern?.name || 'None',
+        patternStage: ai?.pattern?.stage || '—',
+        patternConfidence: ai?.pattern?.confidence || 'low',
+        winRate: ai?.pattern?.historicalWinRate || '',
+        longEntry: lE, longStop: lSL, longTP1: lTP1, longTP2: lTP2, longRR: lRR,
+        shortEntry: sE, shortStop: sSL, shortTP1: sTP1, shortTP2: sTP2, shortRR: sRR,
+        rsi: ta.rsi.toFixed(1), trend: ta.trend,
+        funding: d.funding.toFixed(4), fgValue: d.fgValue,
+        leverage: activeLev,
+        liqPrice: levInfo.liqPrice,
+        suggestedAction: ai?.suggestedAction || '',
+        watchLevel: ai?.watchLevel || ''
+      })
+    });
+    console.log('Alert sent for', coin);
+  } catch(e) {
+    console.error('Alert error:', e);
+  }
 }
 
 async function loadAI(coin,ta,sc,setup,klines){
@@ -683,6 +972,8 @@ async function loadAI(coin,ta,sc,setup,klines){
       <div class="ai-pattern-hist">Historical pattern context: ${ai.historicalPattern||'—'}</div>
     `;
   }
+  // Fire Telegram alert if signals align
+  sendTelegramAlert(coin, ta, sc, setup, ai, mktData[coin], COINS[coin].dec);
 }
 
 async function selectCoin(c){
