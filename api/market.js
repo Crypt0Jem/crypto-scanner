@@ -10,8 +10,12 @@ export default async function handler(req, res) {
     let data;
 
     if (type === 'tickers') {
-      const r = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","SUIUSDT"]');
-      data = await r.json();
+      // Fetch each symbol individually to guarantee array response
+      const syms = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
+      const results = await Promise.all(
+        syms.map(s => fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${s}`).then(r => r.json()))
+      );
+      data = results;
     }
     else if (type === 'klines') {
       const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit||100}`);
