@@ -12,17 +12,15 @@ export default async function handler(req, res) {
     const {
       coin, tf, price, change24h, rsi, trend, funding, fgValue,
       atr, oi, support, resistance, optimalLongEntry, optimalShortEntry,
-      entryMode, mode, mtfSummary, liqZones, candles
+      entryMode, mode, mtfSummary, liqZones, cvdSummary, candles
     } = req.body;
 
-    // Format candles
     const candleStr = candles && candles.length
       ? candles.slice(-50).map((c, i) =>
           `${i+1}. O:${c.o} H:${c.h} L:${c.l} C:${c.c} V:${Math.round(c.v)}`
         ).join('\n')
       : 'No candle data';
 
-    // Format MTF summary
     let liqStr = '';
     if (liqZones) {
       const lse = liqZones.longSweepEntry;
@@ -35,20 +33,14 @@ Short liq cluster (10x-50x shorts): ${liqZones.majorShortCluster}
 Nearest long sweep target: $${liqZones.nearestLongSweep} (125x longs)
 Nearest short squeeze target: $${liqZones.nearestShortSweep} (125x shorts)
 
-## Liquidity Sweep Entry Setups (pre-calculated)
+## Liquidity Sweep Entry Setups
 LONG SWEEP ENTRY (enter after long liq zone is swept):
   Entry: $${lse?.entry} | Stop: $${lse?.stop} | TP1: $${lse?.tp1} | TP2: $${lse?.tp2} | TP3: $${lse?.tp3}
   Logic: ${lse?.logic}
 
 SHORT SWEEP ENTRY (enter after short liq zone is squeezed):
   Entry: $${sse?.entry} | Stop: $${sse?.stop} | TP1: $${sse?.tp1} | TP2: $${sse?.tp2} | TP3: $${sse?.tp3}
-  Logic: $${sse?.logic}
-
-Use this data to:
-1. Evaluate if the sweep entries align with the chart pattern
-2. Flag if price is approaching a liq cluster (imminent sweep risk)
-3. Recommend sweep entry vs pattern entry based on market structure
-4. Note which sweep entry has higher conviction given current trend + MTF
+  Logic: ${sse?.logic}
 `;
     }
 
@@ -68,48 +60,63 @@ Position size multiplier: ${(mtfSummary.positionSizeMultiplier * 100).toFixed(0)
 `;
     }
 
-    const modeContext = mode === 'swing'
-      ? 'This is a SWING TRADE setup. Weekly trend is the dominant filter. Focus on multi-day to multi-week holds. Entries should be at key Daily/4H levels with 1H confirmation.'
-      : 'This is a SCALP TRADE setup. 4H trend is the dominant filter. Focus on 15min to 4-hour holds. Entries should be tight with 5M/15M confirmation.';
+    let cvdStr = '';
+    if (cvdSummary) {
+      const divLine = cvdSummary.divergence
+        ? `DIVERGENCE DETECTED: ${cvdSummary.divergence}\n  Detail: ${cvdSummary.divergenceDesc}\n  Type: ${cvdSummary.divergenceType} -- price and order flow moving in opposite directions`
+        : 'No divergence -- price and order flow are aligned';
+      cvdStr = `
+## Order Flow -- CVD (Cumulative Volume Delta)
+CVD trend: ${cvdSummary.trend} (${cvdSummary.recentBias})
+CVD direction last 20 bars: ${cvdSummary.cvdDirection}
+${divLine}
 
-    const prompt = `You are an expert crypto trading analyst specializing in ${mode === 'swing' ? 'swing' : 'scalp'} trading with high leverage. Analyze this setup and respond in raw JSON only.
+CVD measures real buying vs selling pressure beyond what price shows:
+- Rising CVD = net buying pressure accumulating, supports long bias
+- Falling CVD = net selling pressure accumulating, supports short bias
+- CVD divergence from price = early reversal warning -- weight this heavily
+`;
+    }
+
+    const modeContext = mode === 'swing'
+      ? 'SWING TRADE setup. Weekly trend is the dominant filter. Focus on multi-day to multi-week holds. Entries at key Daily/4H levels with 1H confirmation.'
+      : 'SCALP TRADE setup. 4H trend is the dominant filter. Focus on 15min to 4-hour holds. Tight entries with 5M/15M confirmation.';
+
+    const prompt = `You are an expert crypto trading analyst. Analyze this setup and respond in raw JSON only.
 
 ## Trade Mode
 ${modeContext}
 
-## Market Context
+## Market Data
 Coin: ${coin} | Timeframe: ${tf} | Price: $${price} | 24h: ${change24h}%
 RSI(14): ${rsi} | EMA trend: ${trend} | Funding: ${funding}% | Fear&Greed: ${fgValue}
 ATR: $${atr} | OI: $${oi}B | Support: $${support} | Resistance: $${resistance}
 Optimal long entry: $${optimalLongEntry} | Optimal short entry: $${optimalShortEntry}
-${mtfStr}${liqStr}
-
-## Last 50 ${tf} Candles (OHLCV) — oldest to newest:
+${mtfStr}${cvdStr}${liqStr}
+## Last 50 ${tf} Candles (OHLCV) -- oldest to newest:
 ${candleStr}
 
 ## Instructions
 1. Analyze candle structure for chart patterns
-2. Consider ALL timeframe data — weight higher timeframes more heavily for swing, lower for scalp
-3. If MTF shows counter-trend warning, reduce conviction and flag it clearly
-4. Factor liquidation zones into entry/target recommendations — note if price is near a liq cluster
-5. Mention the nearest sweep target in your suggested action if relevant
-4. For swing mode: identify multi-day pattern, key daily levels, 1H entry trigger
-5. For scalp mode: identify micro pattern, tight entry, quick targets
-6. Factor the position size multiplier from MTF into your recommendation
+2. Weight higher timeframes more for swing, lower for scalp
+3. Flag counter-trend setups clearly and reduce conviction
+4. Factor liquidation zones into entries/targets
+5. IMPORTANT: Weight CVD heavily -- divergence lowers conviction for the price trend; confirmation raises it
+6. Factor position size multiplier from MTF into recommendation
 
 Respond ONLY with this JSON (no markdown, no explanation):
 {
   "conviction": "high|medium|low",
   "bias": "long|short|neutral",
-  "summary": "2-3 sentences combining pattern + MTF confluence",
+  "summary": "2-3 sentences combining pattern + MTF confluence + CVD order flow",
   "mtfVerdict": "1 sentence on what the MTF stack says overall",
   "counterTrend": true or false,
-  "counterTrendWarning": "if counter-trend, explain risk in 1 sentence, else null",
+  "counterTrendWarning": "if counter-trend explain risk in 1 sentence, else null",
   "pattern": {
     "name": "pattern name",
     "stage": "forming|near breakout|confirmed|failed|none",
     "confidence": "high|medium|low",
-    "description": "1-2 sentences on what you see in candles",
+    "description": "1-2 sentences on candle structure",
     "historicalWinRate": "approximate % for this pattern",
     "patternTarget": price or null,
     "patternInvalidation": price or null
@@ -123,15 +130,15 @@ Respond ONLY with this JSON (no markdown, no explanation):
     "shortStop": price,
     "shortTP1": price,
     "shortTP2": price,
-    "entryRationale": "1 sentence — why this entry based on pattern + MTF"
+    "entryRationale": "1 sentence -- why this entry based on pattern + MTF + CVD"
   },
-  "longCase": "bull case incorporating MTF alignment",
-  "shortCase": "bear case incorporating MTF alignment",
-  "keyRisk": "biggest risk considering MTF",
+  "longCase": "bull case incorporating MTF and CVD order flow",
+  "shortCase": "bear case incorporating MTF and CVD order flow",
+  "keyRisk": "biggest risk considering MTF and order flow",
   "watchLevel": "specific price to watch for confirmation",
-  "suggestedAction": "precise action with timeframe context e.g. wait for 1H close above X then enter targeting Y",
-  "historicalPattern": "what this pattern + MTF setup historically leads to",
-  "positionSizeNote": "recommendation on position size based on MTF alignment"
+  "suggestedAction": "precise action with timeframe e.g. wait for 1H close above X then enter targeting Y",
+  "historicalPattern": "what this pattern + MTF + CVD setup historically leads to",
+  "positionSizeNote": "position size recommendation based on MTF alignment and CVD confirmation"
 }`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
