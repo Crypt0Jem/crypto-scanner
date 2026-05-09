@@ -4482,6 +4482,22 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
     }
   }
   if(patternEl){
+    // Pre-compute pattern levels HTML to avoid nested template literals (Chrome V8 strict mode rejects them)
+    var patternLevelsHtml = '';
+    if(pe.longEntry||pe.shortEntry){
+      patternLevelsHtml = '<div class="pattern-levels">'
+        + '<div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$' + fn(rPe.longEntry,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$' + fn(rPe.longStop,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$' + fn(rPe.longTP1,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$' + fn(rPe.longTP2,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$' + fn(rPe.shortEntry,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$' + fn(rPe.shortStop,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$' + fn(rPe.shortTP1,dec) + '</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$' + fn(rPe.shortTP2,dec) + '</div></div>'
+        + (pat.patternTarget ? '<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$' + fn(pat.patternTarget,dec) + '</div></div>' : '')
+        + (pat.patternInvalidation ? '<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$' + fn(pat.patternInvalidation,dec) + '</div></div>' : '')
+        + '</div>';
+    }
     patternEl.innerHTML=`
       <div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div>
       <div class="pattern-header">
@@ -4493,19 +4509,7 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         </div>
       </div>
       <p class="pattern-desc">${pat.description||'—'}</p>
-      ${pe.longEntry||pe.shortEntry?`
-      <div class="pattern-levels">
-        <div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$${fn(rPe.longEntry,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$${fn(rPe.longStop,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$${fn(rPe.longTP1,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$${fn(rPe.longTP2,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$${fn(rPe.shortEntry,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$${fn(rPe.shortStop,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$${fn(rPe.shortTP1,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$${fn(rPe.shortTP2,dec)}</div></div>
-        ${pat.patternTarget?'<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$'+fn(pat.patternTarget,dec)+'</div></div>':''}
-        ${pat.patternInvalidation?'<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$'+fn(pat.patternInvalidation,dec)+'</div></div>':''}
-      </div>`:''}
+      ${patternLevelsHtml}
       ${ai.watchLevel?'<div class="watch-level">Watch level: '+ai.watchLevel+'</div>':''}
       ${ai.suggestedAction?'<div class="action-level">Action: '+ai.suggestedAction+'</div>':''}
     `;
