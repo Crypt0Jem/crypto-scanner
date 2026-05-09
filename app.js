@@ -8,7 +8,6 @@ window.onunhandledrejection = function(e) {
   console.error(msg);
 };
 
-console.log('[SCRIPT] TOP LEVEL - script executing');
 const APP_VERSION='phase3-ws-v1';
 
 // Device detection — skip heavy ops on mobile/iOS
@@ -2960,7 +2959,6 @@ async function renderDetail(coin,klines,mtfData){
   var _scHtmlInner = _hasAdj ? sc+' → '+_adjSc : String(sc);
   var _scoreHtml = '<div class="score-num" style="color:'+scColor+'" title="'+_lwTip+'">' + _scHtmlInner + '<span style="font-size:15px;color:var(--text3)">/10</span></div>'
     + '<div class="score-lbl">'+(_hasAdj?'🧠 Adjusted':'Signal score')+'</div>';
-  // Pre-computed vars — no nested templates allowed
   var _lockSty = 'font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono)';
   var _lockInf = 'font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px';
   var _lDir  = isLocked&&lockedSig&&lockedSig.lockedSetup ? lockedSig.lockedSetup.direction : null;
@@ -3031,7 +3029,7 @@ async function renderDetail(coin,klines,mtfData){
               <span style="font-size:9px;color:${cvdData.trend==='bullish'?'var(--green)':cvdData.trend==='bearish'?'var(--red)':'var(--text2)'};font-family:var(--mono);font-weight:600">${cvdData.trend.toUpperCase()}</span>
             </div>
             ${cvdData.divergence
-              ? `<span style="font-size:9px;padding:2px 8px;border-radius:3px;font-family:var(--mono);background:${cvdData.divergence.type==='bearish'?'rgba(255,77,77,.2)':'rgba(0,208,132,.2)'};color:${cvdData.divergence.type==='bearish'?'var(--red)':'var(--green)'}">${cvdData.divergence.label}</span>`
+              ? '<span style="font-size:9px;padding:2px 8px;border-radius:3px;font-family:var(--mono);background:'+(cvdData.divergence.type==='bearish'?'rgba(255,77,77,.2)':'rgba(0,208,132,.2)')+';color:'+(cvdData.divergence.type==='bearish'?'var(--red)':'var(--green)')+'">'+(cvdData.divergence.label)+'</span>'
               : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">No divergence</span>'
             }
           </div>
@@ -4070,19 +4068,6 @@ function triggerManualAI() {
   if (!pendingAIContext) return;
   const btn = document.getElementById('ai-run-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
-  var _patLevels = (typeof pe !== 'undefined' && (pe.longEntry||pe.shortEntry) && typeof rPe !== 'undefined')
-    ? '<div class="pattern-levels">'
-      +'<div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$'+fn(rPe.longEntry,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$'+fn(rPe.longStop,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$'+fn(rPe.longTP1,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$'+fn(rPe.longTP2,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$'+fn(rPe.shortEntry,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$'+fn(rPe.shortStop,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$'+fn(rPe.shortTP1,dec)+'</div></div>'
-      +'<div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$'+fn(rPe.shortTP2,dec)+'</div></div>'
-      +(pat.patternTarget?'<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$'+fn(pat.patternTarget,dec)+'</div></div>':'')
-      +(pat.patternInvalidation?'<div class="pl-item"><div class="pl-label">Invalidation</div><div class="pl-val vr">$'+fn(pat.patternInvalidation,dec)+'</div></div>':'')
-      +'</div>' : '';
   const patEl = document.getElementById('pattern-section');
   const aiEl  = document.getElementById('ai-section');
   if (patEl) patEl.innerHTML = '<div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div>'
@@ -4506,7 +4491,19 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         </div>
       </div>
       <p class="pattern-desc">${pat.description||'—'}</p>
-      ${_patLevels}
+      ${pe.longEntry||pe.shortEntry?`
+      <div class="pattern-levels">
+        <div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$${fn(rPe.longEntry,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$${fn(rPe.longStop,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$${fn(rPe.longTP1,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$${fn(rPe.longTP2,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$${fn(rPe.shortEntry,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$${fn(rPe.shortStop,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$${fn(rPe.shortTP1,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$${fn(rPe.shortTP2,dec)}</div></div>
+        ${pat.patternTarget ? '<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$'+fn(pat.patternTarget,dec)+'</div></div>' : ''}
+        ${pat.patternInvalidation ? '<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$'+fn(pat.patternInvalidation,dec)+'</div></div>' : ''}
+      </div>`:''}
       ${ai.watchLevel ? '<div class="watch-level">Watch level: '+ai.watchLevel+'</div>' : ''}
       ${ai.suggestedAction ? '<div class="action-level">Action: '+ai.suggestedAction+'</div>' : ''}
     `;
