@@ -2418,9 +2418,12 @@ async function renderDetail(coin,klines,mtfData){
           <span class="cbadge ${v.cls}" style="margin-left:6px">${v.text}</span>
         </div>
       </div>
-      <div class="score-box">
-        <div class="score-num" style="color:${scColor}">${sc}<span style="font-size:15px;color:var(--text3)">/10</span></div>
-        <div class="score-lbl">Signal score</div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+        <div class="score-box">
+          <div class="score-num" style="color:${scColor}">${sc}<span style="font-size:15px;color:var(--text3)">/10</span></div>
+          <div class="score-lbl">Signal score</div>
+        </div>
+        <button onclick="copySignalSnapshot()" style="font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);font-family:var(--mono);cursor:pointer">📋 Copy snapshot</button>
       </div>
     </div>
     ${(function(){
@@ -2932,6 +2935,80 @@ function checkForRealSweep(sig, currentPrice) {
     if (hit && Math.abs(ev.price-currentPrice)<atr*2) return {hit:true,price:ev.price,side:ev.side,qty:ev.qty,timestamp:ev.timestamp};
   }
   return {hit:false};
+}
+
+function copySignalSnapshot() {
+  var ctx  = pendingAIContext || {};
+  var coin = ctx.coin || activeCoin;
+  var ta   = ctx.ta   || window._lastTA   || {};
+  var sc   = ctx.sc   || 0;
+  var setup= ctx.setup|| {};
+  var cvd  = window._lastCvdData || {};
+  var bd   = window._lastScoreBreakdown || {};
+  var d    = mktData[coin] || {};
+  var dec  = (COINS[coin]||{}).dec || 4;
+  var liqZ = ctx.liqZones || {};
+  var mtf  = ctx.mtfData  || {};
+  var ob   = window._lastOB || null;
+
+  // Score breakdown line
+  var bdLabels = {liq:'Liq',cvd:'CVD',mtf:'MTF',vol:'Vol',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI'};
+  var bdLine = Object.keys(bd).filter(function(k){return bd[k]!==0;}).map(function(k){
+    return (bdLabels[k]||k)+' '+(bd[k]>0?'+':'')+bd[k];
+  }).join(' | ');
+
+  // Nearest liq zones
+  var nearLong  = (liqZ.longLiqZones  ||[])[0] || {};
+  var nearShort = (liqZ.shortLiqZones ||[])[0] || {};
+
+  // Open positions
+  var openPos = tradeLog.filter(function(t){return t.status==='open';}).map(function(t){
+    var live = (mktData[t.symbol]||{}).price||0;
+    var pnl  = live>0 ? calcTradePnl(t.entryPrice,live,t.direction,t.leverage) : null;
+    return t.symbol+' '+t.direction.toUpperCase()+' '+t.leverage+'x @ $'+t.entryPrice+(pnl!==null?' → '+(pnl>=0?'+':'')+pnl.toFixed(2)+'%':'');
+  }).join('\n');
+
+  var now = new Date().toUTCString();
+  var utcH = new Date().getUTCHours();
+  var session = (utcH>=13&&utcH<16)?'London+NY overlap':(utcH>=8&&utcH<16)?'London':(utcH>=16&&utcH<21)?'NY':'Asia';
+
+  var snap = [
+    '━━━ SIGNAL SNAPSHOT ━━━',
+    now,
+    '',
+    coin+'/USDT  '+activeTF+'  '+activeMode.toUpperCase()+' mode',
+    'Price:   $'+fn(d.price,dec)+'  ('+fp(d.change24h||0)+')',
+    'Score:   '+sc+'/10  — '+(bdLine||'no breakdown'),
+    'Verdict: '+(verdictOf(sc,ta,cvd).text||'—'),
+    '',
+    '— INDICATORS —',
+    'RSI:      '+((ta.rsi||0).toFixed(1))+(ta.rsi>70?' ⚠ overbought':ta.rsi<30?' ⚠ oversold':''),
+    'Trend:    '+(ta.trend||'—'),
+    'VolSpike: '+(ta.volumeSpike||'—')+'x',
+    'Funding:  '+(d.funding!=null?d.funding.toFixed(4)+'%':'—'),
+    'CVD:      '+(cvd.trend||'—')+'  buy '+(cvd.buyPct||'?')+'% / sell '+(cvd.sellPct||'?')+'%'+(cvd.divergence?' ⚠ DIVERGENCE':''),
+    'MTF:      '+(mtf.confluenceLabel||'—')+' (score '+(mtf.confluenceScore||0)+')',
+    'Session:  '+session,
+    ob?'OB imbal: '+ob.imbalance+'% (bid '+ob.bidVol.toFixed(0)+' vs ask '+ob.askVol.toFixed(0)+')':'OB: not loaded',
+    '',
+    '— SETUPS —',
+    'Long:  entry $'+fn(setup.lE,dec)+'  stop $'+fn(setup.lSL,dec)+'  TP1 $'+fn(setup.lTP1,dec)+'  TP2 $'+fn(setup.lTP2,dec),
+    'Short: entry $'+fn(setup.sE,dec)+'  stop $'+fn(setup.sSL,dec)+'  TP1 $'+fn(setup.sTP1,dec)+'  TP2 $'+fn(setup.sTP2,dec),
+    '',
+    '— LIQ ZONES —',
+    'Nearest long liq:  $'+(nearLong.price||'—')+' ('+( nearLong.leverage||'—')+')',
+    'Nearest short liq: $'+(nearShort.price||'—')+' ('+(nearShort.leverage||'—')+')',
+    '',
+    openPos?('— OPEN POSITIONS —\n'+openPos):'No open positions',
+    '━━━━━━━━━━━━━━━━━━━━━━'
+  ].join('\n');
+
+  navigator.clipboard.writeText(snap).then(function(){
+    var btn = document.querySelector('button[onclick="copySignalSnapshot()"]');
+    if(btn){ btn.textContent='✓ Copied!'; setTimeout(function(){ btn.textContent='📋 Copy snapshot'; },2000); }
+  }).catch(function(){
+    prompt('Copy this snapshot:', snap);
+  });
 }
 
 async function init(){
