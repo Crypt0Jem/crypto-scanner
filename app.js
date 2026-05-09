@@ -35,7 +35,6 @@ let fundingLastFetch = {};
 let pendingAIContext = null;
 
 // Phase 3 Layer 3 — Liq Heatmap toggle
-let liqHeatmapOn = false;
 
 // ── Trade Outcome Tracker ─────────────────────────────────────────────────────
 let tradeLog = [];
@@ -232,22 +231,6 @@ function calcTradePnl(entry, exit, direction, leverage) {
 }
 
 // Seed with existing 8 trades from session
-function seedInitialTrades() {
-  if (localStorage.getItem('tradeLog_seeded_v1')) return;
-  var seed = [
-    { id:'trade_seed1', timestamp:Date.now()-86400000*1, symbol:'BTC', direction:'short', entryPrice:80364, exitPrice:80529, pnlPercent:-40.53, leverage:125, signalType:'swing', notes:'Session trade #1' },
-    { id:'trade_seed2', timestamp:Date.now()-86400000*1, symbol:'BTC', direction:'long',  entryPrice:80347, exitPrice:80252, pnlPercent:-17.83, leverage:75,  signalType:'swing', notes:'Session trade #2' },
-    { id:'trade_seed3', timestamp:Date.now()-86400000*1, symbol:'BTC', direction:'short', entryPrice:80266, exitPrice:79678, pnlPercent:79.75,  leverage:125, signalType:'swing', notes:'Session trade #3' },
-    { id:'trade_seed4', timestamp:Date.now()-86400000*1, symbol:'BTC', direction:'long',  entryPrice:78254, exitPrice:80094, pnlPercent:172.42, leverage:75,  signalType:'post_sweep', notes:'W pattern — scanner called it' },
-    { id:'trade_seed5', timestamp:Date.now()-3600000*8,  symbol:'BTC', direction:'short', entryPrice:79927, exitPrice:79945, pnlPercent:-7.73,  leverage:75,  signalType:'swing', notes:'Session trade #5' },
-    { id:'trade_seed6', timestamp:Date.now()-3600000*6,  symbol:'BTC', direction:'short', entryPrice:80060, exitPrice:80123, pnlPercent:-11.93, leverage:75,  signalType:'swing', notes:'Session trade #6' },
-    { id:'trade_seed7', timestamp:Date.now()-3600000*4,  symbol:'BTC', direction:'long',  entryPrice:80112, exitPrice:80473, pnlPercent:33.81,  leverage:75,  signalType:'swing', notes:'TP1 hit, manually closed' },
-    { id:'trade_seed8', timestamp:Date.now()-3600000*1,  symbol:'XRP', direction:'long',  entryPrice:1.404, exitPrice:1.4012, pnlPercent:-24.88, leverage:125, signalType:'post_sweep', notes:'Sweep confirmed, stopped out before TP1' }
-  ];
-  tradeLog = seed;
-  saveTradeLog();
-  localStorage.setItem('tradeLog_seeded_v1', '1');
-}
 
 function getTradeStats(trades) {
   if (!trades || trades.length === 0) return { winRate:0, totalPnl:0, avgPnl:0, best:null, worst:null, byType:{} };
@@ -773,95 +756,8 @@ function calcConfluenceScore(sig, klines, cvdData, currentOINotional) {
 }
 
 // Spawn a secondary "Sweep Opportunity" signal linked to the primary
-function spawnSecondarySignal(primarySig, klines, cvdData, currentOINotional, dec) {
-  const secKey = primarySig.key + '_sweep';
-  if (swingSignals[secKey]) return; // already spawned
-
-  const c = klines[klines.length - 1];
-  const volMult = getVolumeMultiple(klines);
-  const oiDelta = getOIDelta(primarySig, currentOINotional);
-  const reason = {
-    trigger:       'liq_sweep_reversal',
-    sweepPrice:    primarySig.lockedSetup.bias === 'short' ? c.h : c.l,
-    volumeMultiple:+volMult.toFixed(2),
-    cvdFlipped:    checkCVDFlip(primarySig, cvdData),
-    oiDeltaPct:    +oiDelta.toFixed(2),
-    fundingAtLock: primarySig.snapshot.fundingAtLock,
-    spawnedAt:     Date.now()
-  };
-
-  // Fresh entry at current candle close
-  const entry = c.c;
-  const mmr   = 0.005, imr = 1/50, fee = 0.0005; // use 50x as base for sweep entries
-  const maxSD = (imr - mmr) * 0.6;
-  const isLong = primarySig.lockedSetup.bias !== 'short';
-  const stop  = isLong ? +(entry*(1-maxSD)).toFixed(dec) : +(entry*(1+maxSD)).toFixed(dec);
-  const tp1   = isLong ? +(entry*1.018).toFixed(dec) : +(entry*0.982).toFixed(dec);
-  const tp2   = isLong ? +(entry*1.038).toFixed(dec) : +(entry*0.962).toFixed(dec);
-
-  swingSignals[secKey] = {
-    key:        secKey,
-    symbol:     primarySig.symbol,
-    tf:         primarySig.tf,
-    mode:       'swing',
-    isSecondary:true,
-    parentKey:  primarySig.key,
-    evolvedReason: reason,
-    lockedAt:   Date.now(),
-    lockedCandleTime: getCurrentCandleTime(primarySig.tf),
-    lockedSetup: {
-      bias:             isLong ? 'bullish' : 'bearish',
-      entry, stop, tp1, tp2,
-      invalidationLevel: isLong ? stop : stop,
-      support:    primarySig.lockedSetup.support,
-      resistance: primarySig.lockedSetup.resistance,
-      atr:        primarySig.lockedSetup.atr
-    },
-    snapshot: {
-      score: 7.5,
-      oiAtLock: currentOINotional,
-      fundingAtLock: primarySig.snapshot.fundingAtLock,
-      lockedPrice: entry
-    },
-    dynamic: {
-      status: 'active',
-      candlesElapsed: 0,
-      lastCheckedCandle: getCurrentCandleTime(primarySig.tf),
-      consecutiveLowScore: 0
-    },
-    reEval: {
-      lastChecked: Date.now(),
-      structureBreaks: 0,
-      prevCVDTrend: cvdData?.trend || 'neutral',
-      needsReview: false
-    }
-  };
-  saveSwingSignals();
-  console.log('Sweep signal spawned:', secKey, reason);
-}
 
 // Run Phase 2 re-eval on a signal after every render
-function runPhase2ReEval(sig, klines, cvdData, currentOINotional, dec) {
-  if (!sig || sig.isSecondary) return; // only run on primary signals
-
-  // Update prevCVDTrend for next cycle's flip detection
-  sig.reEval.prevCVDTrend = cvdData?.trend || sig.reEval.prevCVDTrend || 'neutral';
-  sig.reEval.lastChecked = Date.now();
-  const dWS = mktData[sig.symbol]||{};
-  const realSweep = checkForRealSweep(sig, dWS.price||0);
-  if (realSweep.hit) { sig.reEval.lastLiqSweepDetected = {price:realSweep.price,side:realSweep.side,ts:realSweep.timestamp}; }
-
-  const confluence = calcConfluenceScore(sig, klines, cvdData, currentOINotional);
-
-  if (confluence >= 2) {
-    sig.reEval.needsReview = true;
-  }
-  if (confluence >= 3) {
-    spawnSecondarySignal(sig, klines, cvdData, currentOINotional, dec);
-  }
-
-  saveSwingSignals();
-}
 
 // Returns the locked signal if valid, null if should recalculate
 function checkSignalValidity(coin, tf, currentPrice, currentScore){
@@ -1506,132 +1402,6 @@ function renderLiqScaleInCard(coin, tf, price, ta, klines, cvdData, dec, liqZone
   }
 }
 
-function renderSweepCard(liq, dec) {
-  if (!liq || !liq.longSweepEntry || !liq.shortSweepEntry) return '';
-  try {
-    const fn2 = n => safeFormat(n, dec);
-    const ls = liq.longSweepEntry;
-    const ss = liq.shortSweepEntry;
-
-    // Blofin leverage params for current selection
-    const mmr      = activeLev >= 100 ? 0.005 : activeLev >= 25 ? 0.004 : 0.003;
-    const imr      = 1 / activeLev;
-    const fee      = 0.0005;
-    const maxStopD = (imr - mmr) * 0.6;   // max safe stop as decimal
-
-    // Long sweep: liq price at this leverage from the sweep entry
-    const lsLiq      = +(ls.entry * (1 - imr + mmr + fee)).toFixed(dec);
-    const lsLiqDistP = (ls.entry - lsLiq) / ls.entry * 100;
-    const lsStopDistP= (ls.entry - ls.stop) / ls.entry * 100;
-    const lsDanger   = lsStopDistP > lsLiqDistP;      // stop is PAST liq — would liquidate first
-    const lsSafe     = +(ls.entry * (1 - maxStopD)).toFixed(dec);
-
-    // Short sweep
-    const ssLiq      = +(ss.entry * (1 + imr - mmr - fee)).toFixed(dec);
-    const ssLiqDistP = (ssLiq - ss.entry) / ss.entry * 100;
-    const ssStopDistP= (ss.stop - ss.entry) / ss.entry * 100;
-    const ssDanger   = ssStopDistP > ssLiqDistP;
-    const ssSafe     = +(ss.entry * (1 + maxStopD)).toFixed(dec);
-
-    const anyDanger  = lsDanger || ssDanger;
-    const levNote    = anyDanger
-      ? `<span style="margin-left:10px;font-size:10px;background:rgba(255,77,77,.2);color:var(--red);padding:2px 8px;border-radius:3px;font-family:var(--mono)">DANGER: ${activeLev}x liquidates before sweep stops</span>`
-      : `<span style="margin-left:10px;font-size:10px;background:rgba(0,208,132,.1);color:var(--green);padding:2px 8px;border-radius:3px;font-family:var(--mono)">Stops safe at ${activeLev}x</span>`;
-
-    function dangerBox(danger, liq, liqP, stopP, safeStop, isLong) {
-      if (!danger) return `<div style="background:rgba(0,208,132,0.06);border:1px solid var(--green-b);border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:10px;font-family:var(--mono);color:var(--green)">Liq $${fn2(liq)} (${liqP.toFixed(3)}%) — stop triggers first. Safe at ${activeLev}x.</div>`;
-      return `<div style="background:rgba(255,77,77,0.12);border:1px solid var(--red-b);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-family:var(--mono);font-size:10px;color:var(--red);line-height:1.6">
-        <strong>DANGER at ${activeLev}x:</strong> Liq fires at $${fn2(liq)} (${liqP.toFixed(3)}%) — your stop at ${stopP.toFixed(2)}% away fires AFTER liq. You get liquidated, not stopped out.<br>
-        <span style="color:var(--amber)"><strong>Use instead: $${fn2(safeStop)} (${(maxStopD*100).toFixed(3)}% max safe for ${activeLev}x)</strong></span>
-      </div>`;
-    }
-
-    function stopRow(danger, originalStop, safeStop, isLong) {
-      const displayStop = danger ? safeStop : originalStop;
-      const label = danger ? `Safe stop (${activeLev}x)` : 'Stop';
-      const struck = danger
-        ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">Original stop (NOT for ${activeLev}x)</span>
-            <span style="font-size:10px;color:var(--text3);font-family:var(--mono);text-decoration:line-through">$${fn2(originalStop)}</span>
-           </div>`
-        : '';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-          <span style="font-size:11px;color:${danger?'var(--amber)':'var(--text2)'};font-family:var(--mono)">${label}</span>
-          <span style="font-size:12px;color:var(--red);font-family:var(--mono)">$${fn2(displayStop)}</span>
-        </div>${struck}`;
-    }
-
-    function liqRow(liqPrice, liqDistP) {
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">Liq @ ${activeLev}x</span>
-        <span style="font-size:11px;color:rgba(255,77,77,0.6);font-family:var(--mono)">$${fn2(liqPrice)} (${liqDistP.toFixed(3)}%)</span>
-      </div>`;
-    }
-
-    function tpRow(label, price) {
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${label}</span>
-        <span style="font-size:12px;color:var(--green);font-family:var(--mono)">$${fn2(price)}</span>
-      </div>`;
-    }
-
-    return `<div class="card full" style="border-color:rgba(167,139,250,0.3);background:rgba(167,139,250,0.03)">
-      <div class="card-title" style="color:var(--purple)">\u26A1 Liquidity sweep entry setups
-        <span style="margin-left:8px;font-size:10px;color:var(--text3);font-family:var(--mono)">Enter AFTER sweep confirms, not before</span>
-        ${levNote}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-
-        <!-- Long sweep -->
-        <div style="background:rgba(0,208,132,0.05);border:1px solid var(--green-b);border-radius:8px;padding:14px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--green);font-family:var(--mono);margin-bottom:6px">\uD83D\uDFE2 Long after long liq sweep</div>
-          <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:10px;line-height:1.4">${ls.logic}</div>
-          ${dangerBox(lsDanger, lsLiq, lsLiqDistP, lsStopDistP, lsSafe, true)}
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">Enter at</span>
-            <span style="font-size:14px;font-weight:700;color:var(--blue);font-family:var(--mono)">$${fn2(ls.entry)}</span>
-          </div>
-          ${stopRow(lsDanger, ls.stop, lsSafe, true)}
-          ${liqRow(lsLiq, lsLiqDistP)}
-          ${tpRow('TP1', ls.tp1)}
-          ${tpRow('TP2', ls.tp2)}
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0">
-            <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">TP3 (major)</span>
-            <span style="font-size:12px;color:var(--green);font-family:var(--mono)">$${fn2(ls.tp3)}</span>
-          </div>
-          <div style="margin-top:10px;padding:6px 10px;background:rgba(0,208,132,.1);border-radius:4px;font-size:10px;font-family:var(--mono);color:var(--green)">
-            Wait for sweep candle, enter on next 1H close above entry
-          </div>
-        </div>
-
-        <!-- Short squeeze -->
-        <div style="background:rgba(255,77,77,0.05);border:1px solid var(--red-b);border-radius:8px;padding:14px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--red);font-family:var(--mono);margin-bottom:6px">\uD83D\uDD34 Short after short liq squeeze</div>
-          <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:10px;line-height:1.4">${ss.logic}</div>
-          ${dangerBox(ssDanger, ssLiq, ssLiqDistP, ssStopDistP, ssSafe, false)}
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">Enter at</span>
-            <span style="font-size:14px;font-weight:700;color:var(--blue);font-family:var(--mono)">$${fn2(ss.entry)}</span>
-          </div>
-          ${stopRow(ssDanger, ss.stop, ssSafe, false)}
-          ${liqRow(ssLiq, ssLiqDistP)}
-          ${tpRow('TP1', ss.tp1)}
-          ${tpRow('TP2', ss.tp2)}
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0">
-            <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">TP3 (major)</span>
-            <span style="font-size:12px;color:var(--green);font-family:var(--mono)">$${fn2(ss.tp3)}</span>
-          </div>
-          <div style="margin-top:10px;padding:6px 10px;background:rgba(255,77,77,.1);border-radius:4px;font-size:10px;font-family:var(--mono);color:var(--red)">
-            Wait for squeeze candle, enter on next 1H close below entry
-          </div>
-        </div>
-      </div>
-    </div>`;
-  } catch(e) {
-    console.warn('renderSweepCard error:', e);
-    return `<div class="card full" style="border-color:rgba(167,139,250,0.3)"><div class="card-title" style="color:var(--purple)">\u26A1 Sweep entry setups</div><div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Sweep data error: ${e.message}</div></div>`;
-  }
-}
 
 function calcCVDFromKlines(klines) {
   const empty = { source:'kline', deltas:[], cvd:[], divergence:null, trend:'neutral',
@@ -1750,32 +1520,53 @@ async function fetchCVDData(coin, tf) {
 function scoreSignal(coin,ta,mtf){
   const d=mktData[coin];if(!d)return 0;
   let s=0;
-  if(ta.trend==='bullish')s+=2;else if(ta.trend==='mild-bullish')s+=1;
-  if(ta.rsi<35)s+=2;else if(ta.rsi<50)s+=1;
-  if(d.funding<0)s+=2;else if(d.funding<0.01)s+=2;else if(d.funding<0.03)s+=1;
-  if(d.fgValue<30)s+=2;else if(d.fgValue<50)s+=1;
-  if(d.change24h>0&&d.change24h<4)s+=1;else if(d.change24h>=-2&&d.change24h<0)s+=1;
-  let base=Math.round((s/8)*10);
-  // MTF confluence adjustment
-  if(mtf){
-    base+=mtf.confluenceScore; // +3 strong, +2 good, +1 partial, -1 conflicted
-    // Counter-trend penalty
-    if(mtf.positionSizeMultiplier<0.5)base=Math.max(0,base-3);
-    else if(mtf.positionSizeMultiplier<1)base=Math.max(0,base-1);
-  }
-  // Layer 2: funding momentum bonus
-  const sym = (COINS[coin]||{}).sym;
-  const fMom = sym ? calcFundingMomentum(fundingHistoryCache[sym]||[]) : null;
-  if (fMom) {
-    if (fMom.flipped) base += 1;                          // funding flip = sentiment shift
-    if (fMom.momentum === 'accelerating_negative') base += 1; // shorts paying more = long signal
-    if (fMom.momentum === 'accelerating_positive' && ta.trend === 'bearish') base += 1; // longs paying into downtrend
-  }
-  // OI spike penalty (forced liqs = unreliable signal)
-  const oiM = sym ? calcOIMomentum(sym) : null;
-  if (oiM && oiM.spike) base = Math.max(0, base - 1);
 
-  return Math.min(10,Math.max(0,base));
+  // 1. LIQ ZONE PROXIMITY (35% weight — best performer)
+  // Scored in renderDetail when sweep is detected; add base liq awareness here
+  const sym=(COINS[coin]||{}).sym||coin+'USDT';
+  const liqEvents=bybitLiqQueue.filter(function(ev){
+    return ev.symbol===sym && ev.timestamp>Date.now()-14400000;
+  });
+  if(liqEvents.length>=10)s+=3;
+  else if(liqEvents.length>=5)s+=2;
+  else if(liqEvents.length>=2)s+=1;
+
+  // 2. CVD DIVERGENCE / FLIP (25% weight — real order flow)
+  // CVD data passed in via window._lastCvdData when available
+  const cvd=window._lastCvdData;
+  if(cvd){
+    if(cvd.divergence)s+=2;                         // price/flow disagree = opportunity
+    else if(cvd.trend==='bullish'&&ta.trend!=='bearish')s+=1;
+    else if(cvd.trend==='bearish'&&ta.trend!=='bullish')s+=1;
+  }
+
+  // 3. MTF CONFLUENCE (20% weight — prevents trend-fighting)
+  if(mtf){
+    s+=mtf.confluenceScore;                          // +3 strong, +2 good, +1 partial, -1 conflicted
+    if(mtf.positionSizeMultiplier<0.5)s=Math.max(0,s-3);  // counter-trend penalty
+    else if(mtf.positionSizeMultiplier<1)s=Math.max(0,s-1);
+  }
+
+  // 4. VOLUME SPIKE ON WICK (10% weight — confirms real sweep vs noise)
+  if(ta.volumeSpike&&ta.volumeSpike>=2.8)s+=2;
+  else if(ta.volumeSpike&&ta.volumeSpike>=1.8)s+=1;
+
+  // 5. FUNDING MOMENTUM (5% weight — sentiment tailwind)
+  const fMom=sym?calcFundingMomentum(fundingHistoryCache[sym]||[]):null;
+  if(fMom){
+    if(fMom.flipped)s+=1;
+    if(fMom.momentum==='accelerating_negative')s+=1;
+  }
+
+  // 6. RSI EXTREME ONLY (5% weight — tie-breaker, not primary)
+  if(ta.rsi<30)s+=1;       // oversold extreme only
+  else if(ta.rsi>70)s+=1;  // overbought extreme only
+
+  // OI spike penalty — forced liqs = unreliable signal
+  const oiM=sym?calcOIMomentum(sym):null;
+  if(oiM&&oiM.spike)s=Math.max(0,s-1);
+
+  return Math.min(10,Math.max(0,Math.round(s)));
 }
 
 function verdictOf(sc){
@@ -2630,7 +2421,6 @@ async function renderDetail(coin,klines,mtfData){
       ${liqZones ? renderPostSweepCard(detectPostSweepConfirmation(klines, liqZones, dec), dec) : ''}
 
       <!-- Phase 3 Layer 3: Liq Heatmap (populated after render via JS) -->
-      <div class="full" id="liq-heatmap-section"></div>
 
       <!-- Risk Calculator -->
       <div class="full" id="risk-calc-section">
@@ -2805,20 +2595,9 @@ async function renderDetail(coin,klines,mtfData){
     if(!IS_MOBILE) buildCustomChart(klines,setup,dec,activeLev);
     buildLevCard(d.price,setup,activeLev,dec);
     // redraw after lev card updates setup with liq prices
-    setTimeout(()=>{
+    setTimeout(function(){
       if(!IS_MOBILE) buildCustomChart(klines,setup,dec,activeLev);
       if(!IS_MOBILE) buildCVDChart(klines,cvdData);
-      // Phase 3 Layer 3: inject liq heatmap card after custom chart
-      const heatEl = document.getElementById('liq-heatmap-section');
-      if(heatEl) heatEl.innerHTML = renderLiqHeatmapCard(coin, d.price, klines, dec);
-      // Draw canvas after HTML inserted — skip on mobile to prevent freeze
-      if(liqHeatmapOn && !IS_MOBILE) {
-        requestAnimationFrame(function() {
-          requestAnimationFrame(function() {
-            drawLiqHeatmapCanvas(coin, d.price, klines);
-          });
-        });
-      }
     },50);
   },100);
   renderScanBody();
@@ -2830,7 +2609,6 @@ async function renderDetail(coin,klines,mtfData){
 
   // Phase 2 re-eval
   if(activeMode==='swing' && lockedSig && !lockedSig.isSecondary){
-    runPhase2ReEval(lockedSig, klines, cvdData, d.oiNotional||0, dec);
   }
   // Post-sweep Telegram alert — fires immediately on sweep confirmation, no AI needed
   if(liqZones){
@@ -3080,7 +2858,6 @@ async function init(){
   klCache={};aiCache={};
   loadSwingSignals();
   loadTradeLog();
-  seedInitialTrades();
   seedPlaceholders(); // show coins immediately before market data loads
   const scores={};Object.keys(COINS).forEach(c=>{scores[c]=5;});
   renderSidebar(scores);
@@ -3218,89 +2995,121 @@ function getRecentLiqEventsForZone(sym, zonePrice, minutesBack) {
 function detectPostSweepConfirmation(klines, liqZones, dec) {
   if (!klines || klines.length < 3 || !liqZones) return null;
 
-  // Scan last 3 completed candles (newest first) — return freshest sweep
-  for (let offset = 2; offset <= 4; offset++) {
-    const prev = klines[klines.length - offset];      // candidate sweep candle
-    const curr = klines[klines.length - offset + 1];  // candle after it
+  // Volume median of last 20 candles
+  var recent20 = klines.slice(-20).map(function(k){ return k.v; }).sort(function(a,b){return a-b;});
+  var medianVol = recent20[Math.floor(recent20.length/2)] || 1;
+
+  for (var offset = 2; offset <= 4; offset++) {
+    var prev = klines[klines.length - offset];
+    var curr = klines[klines.length - offset + 1];
     if (!prev || !curr) continue;
+    var candlesAgo = offset - 1;
+    if (candlesAgo > 2) continue;
 
-    // Long sweep: wick pierced liq zone AND closed back above it
-    const longZones = liqZones.longLiqZones || [];
-    for (const zone of longZones) {
-      if (prev.l <= zone.price && prev.c > zone.price) {
-        const isConfirmed = curr.c > prev.c;
-        const sweepDepth  = +((prev.c - prev.l) / prev.c * 100).toFixed(3);
-        const recovery    = +((curr.c - prev.l) / (prev.c - prev.l) * 100).toFixed(1);
-        const candlesAgo  = offset - 1;
-        if (candlesAgo > 2) continue;
+    // ── LONG SWEEP ───────────────────────────────────────────────────────────
+    var longZones = liqZones.longLiqZones || [];
+    for (var li = 0; li < longZones.length; li++) {
+      var zone = longZones[li];
+      if (!(prev.l <= zone.price && prev.c > zone.price)) continue;
 
-        // Leverage-aware stop — wick stop if it fits, otherwise cap to max safe
-        const mmrP    = activeLev >= 100 ? 0.005 : activeLev >= 25 ? 0.004 : 0.003;
-        const maxSD   = (1/activeLev - mmrP) * 0.6;
-        const wickStop = +(prev.l * 0.998).toFixed(dec);
-        const wickStopPct = (curr.c - wickStop) / curr.c;
-        const safeStop = +(curr.c * (1 - maxSD)).toFixed(dec);
-        const stopPrice = wickStopPct <= maxSD ? wickStop : safeStop;
-        const stopPct   = +((curr.c - stopPrice) / curr.c * 100).toFixed(3);
-        const stopNote  = wickStopPct <= maxSD ? 'wick' : 'capped';
+      // Hard requirement 1: candle wicked through zone AND closed back above
+      var req1 = prev.c > zone.price;
 
-        var sym = (COINS[activeCoin] || {}).sym || activeCoin + 'USDT';
-        var realLiqEvents = getRecentLiqEventsForZone(sym, zone.price, 240);
-        var recommendedLeverage = realLiqEvents.length >= 3 ? 75 : activeLev > 75 ? 75 : activeLev;
+      // Hard requirement 2: CVD flipped bullish and sustained
+      var cvd = window._lastCvdData;
+      var req2 = cvd && (cvd.trend === 'bullish' || cvd.recentBias === 'buying');
 
-        return {
-          side: 'long', sweepCandle: prev,
-          sweepLow: prev.l, sweepLevel: zone.price, leverage: zone.leverage,
-          entryPrice: +curr.c.toFixed(dec),
-          stopPrice, stopPct, stopNote,
-          tp1: +(curr.c * 1.0045).toFixed(dec),
-          tp2: +(curr.c * 1.009).toFixed(dec),
-          tp3: +(curr.c * 1.018).toFixed(dec),
-          sweepDepth, recovery, confirmed: isConfirmed,
-          candlesAgo, freshness: candlesAgo === 1 ? 'just confirmed' : candlesAgo + ' candles ago',
-          maxSafePct: +(maxSD * 100).toFixed(3),
-          realLiqEvents, recommendedLeverage
-        };
-      }
+      // Hard requirement 3: volume on sweep wick >= 2.8x median
+      var req3 = prev.v >= medianVol * 2.8;
+
+      // Hard requirement 4: price still within 1.2 ATR of zone
+      var atr = (function(){
+        var sum=0; var n=Math.min(14,klines.length-1);
+        for(var i=klines.length-n;i<klines.length;i++){
+          sum+=klines[i].h-klines[i].l;
+        }
+        return sum/n;
+      })();
+      var req4 = Math.abs(curr.c - zone.price) <= atr * 1.2;
+
+      var allReqs = req1 && req2 && req3 && req4;
+      var watchOnly = req1 && !allReqs; // wick confirmed but missing other criteria
+
+      if (!req1) continue; // must at least have the wick close back
+
+      var mmrP   = activeLev>=100?0.005:activeLev>=25?0.004:0.003;
+      var maxSD  = (1/activeLev - mmrP) * 0.6;
+      var wickStop   = +(prev.l * 0.998).toFixed(dec);
+      var wickStopPct = (curr.c - wickStop) / curr.c;
+      var safeStop   = +(curr.c * (1 - maxSD)).toFixed(dec);
+      var stopPrice  = wickStopPct <= maxSD ? wickStop : safeStop;
+      var stopPct    = +((curr.c - stopPrice) / curr.c * 100).toFixed(3);
+      var symL = (COINS[activeCoin]||{}).sym||activeCoin+'USDT';
+      var realLiqEvents = getRecentLiqEventsForZone(symL, zone.price, 240);
+      var recLev = realLiqEvents.length >= 3 ? 75 : activeLev > 75 ? 75 : activeLev;
+      var volMult = +(prev.v / medianVol).toFixed(1);
+
+      return {
+        side:'long', confirmed:allReqs, watchOnly:watchOnly,
+        missingReqs: (!req2?'CVD not flipped ':'') + (!req3?'Vol '+volMult+'x (need 2.8x) ':'') + (!req4?'Price too far from zone':''),
+        sweepCandle:prev, sweepLow:prev.l, sweepLevel:zone.price, leverage:zone.leverage,
+        entryPrice:+curr.c.toFixed(dec), stopPrice, stopPct,
+        stopNote: wickStopPct<=maxSD?'wick':'capped',
+        tp1:+(curr.c*1.0045).toFixed(dec), tp2:+(curr.c*1.009).toFixed(dec), tp3:+(curr.c*1.018).toFixed(dec),
+        sweepDepth:+((prev.c-prev.l)/prev.c*100).toFixed(3),
+        recovery:+((curr.c-prev.l)/(prev.c-prev.l)*100).toFixed(1),
+        candlesAgo, freshness: candlesAgo===1?'just confirmed':candlesAgo+' candles ago',
+        maxSafePct:+(maxSD*100).toFixed(3), volumeMultiple:volMult,
+        realLiqEvents, recommendedLeverage:recLev
+      };
     }
 
-    // Short squeeze: wick pierced liq zone AND closed back below it
-    const shortZones = liqZones.shortLiqZones || [];
-    for (const zone of shortZones) {
-      if (prev.h >= zone.price && prev.c < zone.price) {
-        const isConfirmed = curr.c < prev.c;
-        const sweepDepth  = +((prev.h - prev.c) / prev.c * 100).toFixed(3);
-        const recovery    = +((prev.h - curr.c) / (prev.h - prev.c) * 100).toFixed(1);
-        const candlesAgo  = offset - 1;
-        if (candlesAgo > 2) continue;
+    // ── SHORT SQUEEZE ─────────────────────────────────────────────────────────
+    var shortZones = liqZones.shortLiqZones || [];
+    for (var si = 0; si < shortZones.length; si++) {
+      var zoneS = shortZones[si];
+      if (!(prev.h >= zoneS.price && prev.c < zoneS.price)) continue;
 
-        const mmrP    = activeLev >= 100 ? 0.005 : activeLev >= 25 ? 0.004 : 0.003;
-        const maxSD   = (1/activeLev - mmrP) * 0.6;
-        const wickStop = +(prev.h * 1.002).toFixed(dec);
-        const wickStopPct = (wickStop - curr.c) / curr.c;
-        const safeStop = +(curr.c * (1 + maxSD)).toFixed(dec);
-        const stopPrice = wickStopPct <= maxSD ? wickStop : safeStop;
-        const stopPct   = +((stopPrice - curr.c) / curr.c * 100).toFixed(3);
-        const stopNote  = wickStopPct <= maxSD ? 'wick' : 'capped';
+      var req1S = prev.c < zoneS.price;
+      var cvdS  = window._lastCvdData;
+      var req2S = cvdS && (cvdS.trend === 'bearish' || cvdS.recentBias === 'selling');
+      var req3S = prev.v >= medianVol * 2.8;
+      var atrS  = (function(){
+        var sum=0; var n=Math.min(14,klines.length-1);
+        for(var i=klines.length-n;i<klines.length;i++){ sum+=klines[i].h-klines[i].l; }
+        return sum/n;
+      })();
+      var req4S = Math.abs(curr.c - zoneS.price) <= atrS * 1.2;
 
-        var symS = (COINS[activeCoin] || {}).sym || activeCoin + 'USDT';
-        var realLiqEventsS = getRecentLiqEventsForZone(symS, zone.price, 240);
-        var recommendedLeverageS = realLiqEventsS.length >= 3 ? 75 : activeLev > 75 ? 75 : activeLev;
+      var allReqsS  = req1S && req2S && req3S && req4S;
+      var watchOnlyS = req1S && !allReqsS;
+      if (!req1S) continue;
 
-        return {
-          side: 'short', sweepCandle: prev,
-          sweepHigh: prev.h, sweepLevel: zone.price, leverage: zone.leverage,
-          entryPrice: +curr.c.toFixed(dec),
-          stopPrice, stopPct, stopNote,
-          tp1: +(curr.c * 0.9955).toFixed(dec),
-          tp2: +(curr.c * 0.991).toFixed(dec),
-          tp3: +(curr.c * 0.982).toFixed(dec),
-          sweepDepth, recovery, confirmed: isConfirmed,
-          candlesAgo, freshness: candlesAgo === 1 ? 'just confirmed' : candlesAgo + ' candles ago',
-          maxSafePct: +(maxSD * 100).toFixed(3),
-          realLiqEvents: realLiqEventsS, recommendedLeverage: recommendedLeverageS
-        };
-      }
+      var mmrPS  = activeLev>=100?0.005:activeLev>=25?0.004:0.003;
+      var maxSDS = (1/activeLev - mmrPS) * 0.6;
+      var wickStopS    = +(prev.h * 1.002).toFixed(dec);
+      var wickStopPctS = (wickStopS - curr.c) / curr.c;
+      var safeStopS    = +(curr.c * (1 + maxSDS)).toFixed(dec);
+      var stopPriceS   = wickStopPctS <= maxSDS ? wickStopS : safeStopS;
+      var stopPctS     = +((stopPriceS - curr.c) / curr.c * 100).toFixed(3);
+      var symS = (COINS[activeCoin]||{}).sym||activeCoin+'USDT';
+      var realLiqEventsS = getRecentLiqEventsForZone(symS, zoneS.price, 240);
+      var recLevS = realLiqEventsS.length >= 3 ? 75 : activeLev > 75 ? 75 : activeLev;
+      var volMultS = +(prev.v / medianVol).toFixed(1);
+
+      return {
+        side:'short', confirmed:allReqsS, watchOnly:watchOnlyS,
+        missingReqs: (!req2S?'CVD not flipped ':'') + (!req3S?'Vol '+volMultS+'x (need 2.8x) ':'') + (!req4S?'Price too far from zone':''),
+        sweepCandle:prev, sweepHigh:prev.h, sweepLevel:zoneS.price, leverage:zoneS.leverage,
+        entryPrice:+curr.c.toFixed(dec), stopPrice:stopPriceS, stopPct:stopPctS,
+        stopNote: wickStopPctS<=maxSDS?'wick':'capped',
+        tp1:+(curr.c*0.9955).toFixed(dec), tp2:+(curr.c*0.991).toFixed(dec), tp3:+(curr.c*0.982).toFixed(dec),
+        sweepDepth:+((prev.h-prev.c)/prev.c*100).toFixed(3),
+        recovery:+((prev.h-curr.c)/(prev.h-prev.c)*100).toFixed(1),
+        candlesAgo, freshness: candlesAgo===1?'just confirmed':candlesAgo+' candles ago',
+        maxSafePct:+(maxSDS*100).toFixed(3), volumeMultiple:volMultS,
+        realLiqEvents:realLiqEventsS, recommendedLeverage:recLevS
+      };
     }
   }
   return null;
@@ -3314,8 +3123,16 @@ function renderPostSweepCard(sweep, dec) {
   var col    = isLong ? 'var(--green)' : 'var(--red)';
   var bg     = isLong ? 'rgba(0,208,132,0.04)' : 'rgba(255,77,77,0.04)';
   var border = isLong ? 'rgba(0,208,132,0.5)' : 'rgba(255,77,77,0.5)';
-  var conf   = sweep.confirmed ? 'CONFIRMED' : 'WATCH — not confirmed yet';
-  var confCol= sweep.confirmed ? 'var(--green)' : 'var(--amber)';
+
+  // Status: SIGNAL (all 4 reqs met) or WATCH (wick confirmed but missing criteria)
+  var conf, confCol, borderFinal, bgFinal;
+  if (sweep.confirmed) {
+    conf='⚡ SIGNAL — all criteria met'; confCol='var(--green)';
+    borderFinal=border; bgFinal=bg;
+  } else {
+    conf='👁 WATCH — ' + (sweep.missingReqs||'criteria not met'); confCol='var(--amber)';
+    borderFinal='rgba(245,166,35,0.4)'; bgFinal='rgba(245,166,35,0.03)';
+  }
 
   // Sweep strength score
   var d = mktData[activeCoin] || {};
@@ -3601,260 +3418,12 @@ function triggerManualAI() {
 }
 
 // ── Phase 3 Layer 3: Liq Heatmap ─────────────────────────────────────────────
-function toggleLiqHeatmap(on) {
-  liqHeatmapOn = !!on;
-  const heatEl = document.getElementById('liq-heatmap-section');
-  if (!heatEl) return;
-  if (!pendingAIContext) return;
-  const ctx = pendingAIContext;
-  const price = (mktData[ctx.coin] || {}).price || 0;
-  heatEl.innerHTML = renderLiqHeatmapCard(ctx.coin, price, ctx.klines, COINS[ctx.coin].dec);
-  if (liqHeatmapOn) {
-    requestAnimationFrame(function() {
-      requestAnimationFrame(function() {
-        drawLiqHeatmapCanvas(ctx.coin, price, ctx.klines);
-      });
-    });
-  }
-}
 
 // Build heatmap data from bybitLiqQueue or pivot fallback
-function buildLiqHeatmap(coin, currentPrice, klines) {
-  if (!currentPrice || currentPrice <= 0) return { bins: [], isFallback: true, eventCount: 0 };
-  const sym = (COINS[coin] || {}).sym || coin + 'USDT';
-  const cutoff = Date.now() - 14400000; // 4 hours
-
-  // Filter queue to this coin, last 4h
-  const events = bybitLiqQueue.filter(function(ev) {
-    return ev.symbol === sym && ev.timestamp >= cutoff;
-  });
-
-  const bucketPct = 0.005; // 0.5% bucket size
-  const priceRange = 0.12; // show ±12% from price
-  const numBuckets = Math.round(priceRange * 2 / bucketPct);
-  const minPrice = currentPrice * (1 - priceRange);
-  const maxPrice = currentPrice * (1 + priceRange);
-
-  // Build empty bins
-  var bins = [];
-  var i;
-  for (i = 0; i < numBuckets; i++) {
-    var binLow  = minPrice + i * (maxPrice - minPrice) / numBuckets;
-    var binMid  = binLow + (maxPrice - minPrice) / numBuckets / 2;
-    bins.push({ priceMid: binMid, binLow: binLow, longCount: 0, shortCount: 0, totalQty: 0 });
-  }
-
-  if (events.length >= 20) {
-    // Real data path
-    events.forEach(function(ev) {
-      var idx = Math.floor((ev.price - minPrice) / (maxPrice - minPrice) * numBuckets);
-      if (idx < 0 || idx >= numBuckets) return;
-      if (ev.side === 'Buy') { bins[idx].shortCount += 1; } // Buy = market bought short's position = short liq
-      else { bins[idx].longCount += 1; }
-      bins[idx].totalQty += ev.qty || 0;
-    });
-    var maxCount = 0;
-    bins.forEach(function(b) { if ((b.longCount + b.shortCount) > maxCount) maxCount = b.longCount + b.shortCount; });
-    bins.forEach(function(b) { b.density = maxCount > 0 ? (b.longCount + b.shortCount) / maxCount : 0; });
-    return { bins: bins, isFallback: false, eventCount: events.length };
-  }
-
-  // Fallback: use pivot levels to weight bins
-  var pivots = findPivotLevels(klines ? klines.slice(-60) : [], 3);
-  pivots.lows.forEach(function(lv) {
-    var idx = Math.floor((lv - minPrice) / (maxPrice - minPrice) * numBuckets);
-    if (idx >= 0 && idx < numBuckets) { bins[idx].longCount += 3; } // long liqs cluster near swing lows
-  });
-  pivots.highs.forEach(function(lv) {
-    var idx = Math.floor((lv - minPrice) / (maxPrice - minPrice) * numBuckets);
-    if (idx >= 0 && idx < numBuckets) { bins[idx].shortCount += 3; }
-  });
-  // Add calculated liq zone weights from current price
-  var leverageTiers = [
-    { lev: 10, stopPct: 0.09 }, { lev: 25, stopPct: 0.038 },
-    { lev: 50, stopPct: 0.018 }, { lev: 100, stopPct: 0.009 }, { lev: 125, stopPct: 0.007 }
-  ];
-  leverageTiers.forEach(function(t) {
-    var longLiqP = currentPrice * (1 - t.stopPct);
-    var shortLiqP = currentPrice * (1 + t.stopPct);
-    var idxL = Math.floor((longLiqP - minPrice) / (maxPrice - minPrice) * numBuckets);
-    var idxS = Math.floor((shortLiqP - minPrice) / (maxPrice - minPrice) * numBuckets);
-    if (idxL >= 0 && idxL < numBuckets) bins[idxL].longCount += 2;
-    if (idxS >= 0 && idxS < numBuckets) bins[idxS].shortCount += 2;
-  });
-  var maxCount2 = 0;
-  bins.forEach(function(b) { if ((b.longCount + b.shortCount) > maxCount2) maxCount2 = b.longCount + b.shortCount; });
-  bins.forEach(function(b) { b.density = maxCount2 > 0 ? (b.longCount + b.shortCount) / maxCount2 : 0; });
-  return { bins: bins, isFallback: true, eventCount: events.length };
-}
 
 // Render the heatmap card as HTML string (drawn on canvas via setTimeout)
-function renderLiqHeatmapCard(coin, currentPrice, klines, dec) {
-  if (!liqHeatmapOn) return '';
-  if (!currentPrice || currentPrice <= 0) return '';
-  const heatData = buildLiqHeatmap(coin, currentPrice, klines);
-  const statusText = heatData.isFallback
-    ? 'Estimated — WS queue <20 events (pivot + lev clusters)'
-    : 'Live — ' + heatData.eventCount + ' liq events (4h window)';
-  const statusCol = heatData.isFallback ? 'var(--amber)' : 'var(--green)';
-
-  return '<div class="card full" style="border-color:rgba(74,158,255,0.2);background:rgba(10,10,10,0.6)">'
-    + '<div class="card-title" style="color:var(--blue);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'
-    + '<span>Liquidation Heatmap'
-    + '<span style="margin-left:10px;font-size:9px;padding:2px 8px;border-radius:3px;background:' + (heatData.isFallback ? 'rgba(245,166,35,0.12)' : 'rgba(0,208,132,0.12)') + ';color:' + statusCol + ';font-family:var(--mono)">' + statusText + '</span></span>'
-    + '<button onclick="toggleLiqHeatmap(false);document.getElementById(\'liq-heat-toggle\').checked=false" style="font-size:9px;background:transparent;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">Hide</button>'
-    + '</div>'
-    + '<div style="position:relative;width:100%;border-radius:8px;overflow:hidden;background:#0d0d0d">'
-    + '<canvas id="liq-heatmap-canvas" style="width:100%;height:380px;display:block"></canvas>'
-    + '</div>'
-    + '<div style="display:flex;gap:20px;margin-top:10px;flex-wrap:wrap;align-items:center">'
-    + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono);display:flex;align-items:center;gap:6px">'
-    + '<span style="width:28px;height:8px;background:linear-gradient(to right,rgba(255,77,77,0.1),rgba(255,77,77,0.9));border-radius:2px;display:inline-block"></span>Long liqs (below price)</span>'
-    + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono);display:flex;align-items:center;gap:6px">'
-    + '<span style="width:28px;height:8px;background:linear-gradient(to right,rgba(0,208,132,0.1),rgba(0,208,132,0.9));border-radius:2px;display:inline-block"></span>Short liqs (above price)</span>'
-    + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">Brighter = denser cluster = likely sweep target</span>'
-    + '</div>'
-    + '</div>';
-}
 
 // Draw heatmap on canvas — Coinglass-style with heat gradient and price axis
-function drawLiqHeatmapCanvas(coin, currentPrice, klines) {
-  const canvas = document.getElementById('liq-heatmap-canvas');
-  if (!canvas) return;
-  // Ensure layout is settled before reading width
-  const W = canvas.getBoundingClientRect().width || canvas.parentElement && canvas.parentElement.offsetWidth || 720;
-  const H = 380;
-  const heatData = buildLiqHeatmap(coin, currentPrice, klines);
-  const bins = heatData.bins;
-  if (!bins || bins.length === 0) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(W * dpr);
-  canvas.height = Math.round(H * dpr);
-  const cx = canvas.getContext('2d');
-  cx.scale(dpr, dpr);
-  cx.clearRect(0, 0, W, H);
-
-  // Layout: left price axis, center bars area, right price labels
-  const axisW = 68;   // left price label column
-  const barAreaW = W - axisW - 10;
-  const priceRange = 0.12;
-  const minP = currentPrice * (1 - priceRange);
-  const maxP = currentPrice * (1 + priceRange);
-  const binH = H / bins.length;
-
-  // Background grid lines
-  cx.strokeStyle = 'rgba(255,255,255,0.04)';
-  cx.lineWidth = 1;
-  var gridSteps = 8;
-  var g;
-  for (g = 0; g <= gridSteps; g++) {
-    var gx = axisW + (barAreaW / gridSteps) * g;
-    cx.beginPath(); cx.moveTo(gx, 0); cx.lineTo(gx, H); cx.stroke();
-  }
-
-  // Draw bins
-  bins.forEach(function(b, i) {
-    // Y: index 0 = lowest price bucket, at bottom of canvas
-    var y = H - (i + 1) * binH;
-    var d = b.density;
-    if (d <= 0.01) return;
-
-    var isAbove = b.priceMid > currentPrice;
-    var barW = Math.max(2, d * barAreaW * 0.88);
-
-    // Heat color: low density = dark tint, high = vivid saturated
-    // Long liqs (below): dark-red → orange-red → bright orange
-    // Short liqs (above): dark-green → teal → vivid green
-    var r, gr, bl, alpha;
-    if (!isAbove) {
-      // Long liq zone — red heat
-      r  = Math.round(180 + d * 75);
-      gr = Math.round(20  + d * 60);
-      bl = Math.round(20  + d * 10);
-      alpha = 0.18 + d * 0.82;
-    } else {
-      // Short liq zone — green heat
-      r  = Math.round(0   + d * 30);
-      gr = Math.round(140 + d * 68);
-      bl = Math.round(60  + d * 40);
-      alpha = 0.18 + d * 0.82;
-    }
-
-    // Gradient bar: fades from left edge to full color at tip
-    var grad = cx.createLinearGradient(axisW, 0, axisW + barW, 0);
-    grad.addColorStop(0, 'rgba(' + r + ',' + gr + ',' + bl + ',0.05)');
-    grad.addColorStop(1, 'rgba(' + r + ',' + gr + ',' + bl + ',' + alpha.toFixed(2) + ')');
-    cx.fillStyle = grad;
-    cx.fillRect(axisW, y + 0.5, barW, Math.max(binH - 1, 1));
-
-    // Glow tip for high-density bins
-    if (d > 0.6) {
-      cx.shadowColor = isAbove ? 'rgba(0,220,140,0.5)' : 'rgba(255,80,60,0.5)';
-      cx.shadowBlur = 6;
-      cx.fillStyle = 'rgba(' + r + ',' + gr + ',' + bl + ',' + Math.min(alpha + 0.15, 1).toFixed(2) + ')';
-      cx.fillRect(axisW + barW - 3, y + 0.5, 3, Math.max(binH - 1, 1));
-      cx.shadowBlur = 0;
-    }
-  });
-
-  // Price axis labels (left column) — draw every ~5 bins
-  cx.font = '9px DM Mono, monospace';
-  cx.textAlign = 'right';
-  var labelEvery = Math.max(1, Math.round(bins.length / 14));
-  bins.forEach(function(b, i) {
-    if (i % labelEvery !== 0) return;
-    var y = H - (i + 1) * binH;
-    var isAbove = b.priceMid > currentPrice;
-    var d = b.density;
-    cx.fillStyle = d > 0.5
-      ? (isAbove ? 'rgba(0,210,132,0.9)' : 'rgba(255,110,80,0.9)')
-      : 'rgba(255,255,255,0.25)';
-    var priceStr = b.priceMid >= 1000
-      ? '$' + Math.round(b.priceMid).toLocaleString('en-US')
-      : '$' + b.priceMid.toFixed(2);
-    cx.fillText(priceStr, axisW - 4, y + binH * 0.68);
-  });
-
-  // Density % labels at bar tips for hot zones
-  cx.textAlign = 'left';
-  bins.forEach(function(b, i) {
-    if (b.density < 0.55) return;
-    var y = H - (i + 1) * binH;
-    var barW = Math.max(2, b.density * barAreaW * 0.88);
-    cx.fillStyle = 'rgba(255,255,255,0.5)';
-    cx.font = '8px DM Mono, monospace';
-    cx.fillText(Math.round(b.density * 100) + '%', axisW + barW + 4, y + binH * 0.7);
-  });
-
-  // Current price line — bright white with glow
-  var priceY = H - ((currentPrice - minP) / (maxP - minP)) * H;
-  cx.shadowColor = 'rgba(255,255,255,0.6)';
-  cx.shadowBlur = 8;
-  cx.strokeStyle = 'rgba(255,255,255,0.95)';
-  cx.lineWidth = 1.5;
-  cx.setLineDash([]);
-  cx.beginPath();
-  cx.moveTo(axisW, priceY);
-  cx.lineTo(W - 4, priceY);
-  cx.stroke();
-  cx.shadowBlur = 0;
-
-  // Current price pill label
-  var priceLabel = currentPrice >= 1000
-    ? '$' + Math.round(currentPrice).toLocaleString('en-US')
-    : '$' + currentPrice.toFixed(2);
-  cx.font = 'bold 10px DM Mono, monospace';
-  var labelW = cx.measureText(priceLabel).width + 12;
-  cx.fillStyle = 'rgba(255,255,255,0.95)';
-  cx.beginPath();
-  cx.roundRect(axisW - labelW - 2, priceY - 9, labelW, 17, 3);
-  cx.fill();
-  cx.fillStyle = '#0a0a0a';
-  cx.textAlign = 'right';
-  cx.fillText(priceLabel, axisW - 8, priceY + 4);
-  cx.textAlign = 'left';
-}
 
 // ── Risk Calculator ───────────────────────────────────────────────────────────
 function loadRiskSettings() {
