@@ -166,6 +166,7 @@ function updateTrade(id) {
   var idx = tradeLog.findIndex(function(t) { return t.id === id; });
   if (idx === -1) return;
   var t      = tradeLog[idx];
+  var dir    = document.getElementById('et-dir') ? document.getElementById('et-dir').value : t.direction;
   var entry  = parseFloat(document.getElementById('et-entry').value)  || t.entryPrice;
   var exit   = parseFloat(document.getElementById('et-exit').value)   || t.exitPrice;
   var lev    = parseInt(document.getElementById('et-lev').value)      || t.leverage;
@@ -175,7 +176,7 @@ function updateTrade(id) {
   var pnl    = (entry && exit) ? calcTradePnl(entry, exit, t.direction, lev) : t.pnlPercent;
   var rusdT  = (size && pnl != null) ? +(pnl / 100 * size).toFixed(2) : t.realizedUSDT;
   var status = exit ? 'closed' : 'open';
-  tradeLog[idx] = Object.assign({}, t, { entryPrice:entry, exitPrice:exit||null, pnlPercent:pnl, realizedUSDT:rusdT, sizeUSDT:size, leverage:lev, signalType:sig, notes:notes, status:status });
+  tradeLog[idx] = Object.assign({}, t, { direction:dir, entryPrice:entry, exitPrice:exit||null, pnlPercent:pnl, realizedUSDT:rusdT, sizeUSDT:size, leverage:lev, signalType:sig, notes:notes, status:status });
   saveTradeLog();
   showTradeLog();
 }
@@ -192,8 +193,12 @@ function startEditTrade(id) {
   var levOpts = [10,25,50,75,100,125].map(function(l) {
     return '<option value="' + l + '"' + (t.leverage===l?' selected':'') + '>' + l + 'x</option>';
   }).join('');
+  var dirOpts = ['long','short'].map(function(d) {
+    return '<option value="' + d + '"' + (t.direction===d?' selected':'') + '>' + d + '</option>';
+  }).join('');
   row.innerHTML = '<td colspan="8" style="padding:10px 8px;background:rgba(74,158,255,0.06)">'
     + '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
+    + '<select id="et-dir" style="' + inp + '">' + dirOpts + '</select>'
     + '<input id="et-entry" type="number" step="any" value="' + (t.entryPrice||'') + '" placeholder="Entry" style="' + inp + 'width:90px">'
     + '<input id="et-exit"  type="number" step="any" value="' + (t.exitPrice||'')  + '" placeholder="Exit (blank=open)" style="' + inp + 'width:110px">'
     + '<input id="et-size"  type="number" step="any" value="' + (t.sizeUSDT||'')  + '" placeholder="Size USDT" style="' + inp + 'width:90px">'
@@ -343,7 +348,7 @@ function showTradeLog() {
       var fCol    = floatPct == null ? 'var(--text3)' : floatPct >= 0 ? 'var(--green)' : 'var(--red)';
       var pctStr  = floatPct != null ? (floatPct >= 0 ? '+' : '') + floatPct.toFixed(2) + '%' : 'loading...';
       var usdtStr = floatUSDT != null ? ' / ' + (floatUSDT >= 0 ? '+' : '') + floatUSDT + 'U' : '';
-      openHtml += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 14px;background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.25);border-radius:8px;margin-bottom:8px">'
+      openHtml += '<div id="row-' + t.id + '" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 14px;background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.25);border-radius:8px;margin-bottom:8px">'
         + '<div style="display:flex;align-items:center;gap:10px">'
         + '<span style="font-size:12px;font-weight:700;font-family:var(--mono)">' + t.symbol + '</span>'
         + (t.direction==='long' ? '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,208,132,0.12);color:var(--green);font-family:var(--mono)">▲ LONG</span>' : '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(255,77,77,0.12);color:var(--red);font-family:var(--mono)">▼ SHORT</span>')
