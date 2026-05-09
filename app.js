@@ -1128,7 +1128,6 @@ function findPivotLevels(klines, strength=3) {
   }
   return { highs:highs.slice(-6), lows:lows.slice(-6) };
 }
-console.log('[SCRIPT] 1130 reached');
 
 function calcTA(klines){
   if(!klines||klines.length<14)return{rsi:50,ema20:0,ema50:null,atr:0,trend:'neutral',support:0,resistance:0,volProfile:[],poc:0};
@@ -1414,6 +1413,7 @@ function renderLiqScaleInCard(coin, tf, price, ta, klines, cvdData, dec, liqZone
     const atr = ta.atr;
     const fn2 = n => safeFormat(n, dec);
     const d   = mktData[coin] || {};
+console.log('[SCRIPT] 1415 reached');
 
     // ── Build one card for long side, one for short side ─────────────────────
     function buildCard(side, zones) {
@@ -1688,6 +1688,7 @@ function renderSweepCard(liq, dec) {
             Wait for sweep candle, enter on next 1H close above entry
           </div>
         </div>
+console.log('[SCRIPT] 1689 reached');
 
         <!-- Short squeeze -->
         <div style="background:rgba(255,77,77,0.05);border:1px solid var(--red-b);border-radius:8px;padding:14px">
@@ -1976,6 +1977,7 @@ function buildCustomChart(klines, setup, dec, lev) {
   // Background
   ctx.fillStyle = '#181818';
   ctx.fillRect(0, 0, W, H);
+console.log('[SCRIPT] 1977 reached');
 
   // Grid
   ctx.strokeStyle = 'rgba(255,255,255,0.04)';
@@ -2269,7 +2271,6 @@ function buildTVChart(coin,tf){
   sDesktop.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
   sDesktop.async=true;
   sDesktop.innerHTML=JSON.stringify({autosize:true,symbol:COINS[coin].tv,interval:TF_TV[tf],timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',enable_publishing:false,backgroundColor:'rgba(17,17,17,1)',gridColor:'rgba(255,255,255,0.04)',hide_top_toolbar:false,hide_legend:false,save_image:false,hide_volume:false,support_host:'https://www.tradingview.com'});
-console.log('[SCRIPT] 2270 reached');
   c.appendChild(sDesktop);
 }
 
@@ -3390,7 +3391,6 @@ function calcEntryQualityScore(ob, liqZones, price, atr, direction) {
 async function fetchFundingHistory(bybitSym) {
   const now = Date.now();
   const lastFetch = fundingLastFetch[bybitSym] || 0;
-console.log('[SCRIPT] 3390 reached');
   // Only refetch if >8 hours since last fetch
   if (fundingHistoryCache[bybitSym] && (now - lastFetch) < 28800000) {
     return fundingHistoryCache[bybitSym];
