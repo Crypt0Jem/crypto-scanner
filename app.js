@@ -1,14 +1,3 @@
-// DIAGNOSTIC - catch ALL errors including parse/load
-window.onerror = function(msg, src, line, col, err) {
-  console.error('JS ERROR line ' + line + ': ' + msg, err);
-};
-window.onunhandledrejection = function(e) {
-  var msg = 'PROMISE REJECTION: ' + (e.reason ? (e.reason.message || String(e.reason)) : String(e));
-  document.body.innerHTML = '<div style="background:#1a0000;color:#ff6b6b;padding:20px;font-family:monospace;font-size:13px">' + msg + '</div>';
-  console.error(msg);
-};
-
-console.log('[SCRIPT] TOP LEVEL');
 const APP_VERSION='phase3-ws-v1';
 
 // Device detection — skip heavy ops on mobile/iOS
@@ -179,103 +168,12 @@ function getTradeStats(trades) {
     byType:    byType
   };
 }
-console.log('[SCRIPT] A181');
-
-// ── Learning System ─────────────────────────────────────────────────────────
-function calculateSignalWeight(signalType) {
-  var trades = tradeLog.filter(function(t) {
-    return t.status !== 'open' && t.signalType === signalType;
-  });
-  var n = trades.length;
-  if (n < 8) return 1.0;
-  var wins = trades.filter(function(t) {
-    return t.realizedUSDT != null ? t.realizedUSDT > 0 : (t.pnlPercent || 0) > 0;
-  }).length;
-  var postAlpha = 2 + wins;
-  var postBeta  = 3 + (n - wins);
-  var bayesWR   = postAlpha / (postAlpha + postBeta);
-  var mult = 0.3 + 0.7 * bayesWR;
-  return +Math.max(0.60, Math.min(1.40, mult)).toFixed(3);
-}
-console.log('[SCRIPT] A199');
-
-function applyLearningWeight(rawScore, signalType) {
-  var w = calculateSignalWeight(signalType || 'swing');
-  return +Math.min(10, Math.max(0, rawScore * w)).toFixed(1);
-}
-console.log('[SCRIPT] A205');
-
-function getLearnedWeights() {
-  var types = ['swing','scalp','post_sweep','liq_scale','sweep_opp'];
-  var labels = { swing:'Swing', scalp:'Scalp', post_sweep:'Post-Sweep', liq_scale:'Scale-In', sweep_opp:'Sweep Opp' };
-  var out = {};
-  types.forEach(function(t) {
-    var trades = tradeLog.filter(function(x) { return x.status !== 'open' && x.signalType === t; });
-    var n = trades.length;
-    var w = calculateSignalWeight(t);
-    var wins = n > 0 ? trades.filter(function(x) {
-      return x.realizedUSDT != null ? x.realizedUSDT > 0 : (x.pnlPercent || 0) > 0;
-    }).length : 0;
-    out[t] = { weight:w, tradeCount:n, winRate: n>0 ? +(wins/n*100).toFixed(0) : null, active: n>=8, label: labels[t]||t };
-  });
-  return out;
-}
-// ─────────────────────────────────────────────────────────────────────────────
-console.log('[SCRIPT] A223');
-
-function getSessionStats(hoursBack) {
-  var cutoff = Date.now() - (hoursBack || 24) * 3600000;
-  var recent = tradeLog.filter(function(t) {
-    return t.status !== 'open' && t.timestamp >= cutoff;
-  });
-  if (!recent.length) return null;
-  var isWin = function(t) { return t.realizedUSDT != null ? t.realizedUSDT > 0 : (t.pnlPercent || 0) > 0; };
-  var wins     = recent.filter(isWin).length;
-  var usdtList = recent.filter(function(t) { return t.realizedUSDT != null; });
-  var totalUSDT= usdtList.length > 0 ? +usdtList.reduce(function(s,t){ return s + t.realizedUSDT; }, 0).toFixed(2) : null;
-  var totalPnl = +recent.reduce(function(s,t){ return s + (t.pnlPercent||0); }, 0).toFixed(1);
-  var best     = recent.reduce(function(a,b){
-    var av = a.realizedUSDT != null ? a.realizedUSDT : (a.pnlPercent||0);
-    var bv = b.realizedUSDT != null ? b.realizedUSDT : (b.pnlPercent||0);
-    return bv > av ? b : a;
-  }, recent[0]);
-  return { count: recent.length, wins: wins, losses: recent.length - wins, totalUSDT: totalUSDT, totalPnl: totalPnl, best: best };
-}
-console.log('[SCRIPT] A243');
-
+// Learning system removed — applyLearningWeight is a no-op pass-through
+function applyLearningWeight(rawScore) { return +Number(rawScore).toFixed(1); }
 function renderSessionPnl() {
   var el = document.getElementById('session-pnl-panel');
-  if (!el) return;
-  var s = getSessionStats(24);
-  var lw = getLearnedWeights();
-  var activeW = Object.keys(lw).filter(function(t){ return lw[t].active; });
-  var learnHtml = '';
-  if (activeW.length > 0) {
-    var lwParts = activeW.map(function(t) {
-      var pct = ((lw[t].weight-1)*100).toFixed(0);
-      var col = lw[t].weight >= 1 ? 'var(--green)' : 'var(--amber)';
-      return '<span style="color:'+col+';font-size:9px;font-family:var(--mono)">'+lw[t].label+' '+(lw[t].weight>=1?'+':'')+pct+'%</span>';
-    }).join(' ');
-    learnHtml = '<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)">'
-      + '<div style="font-size:9px;color:var(--purple);font-family:var(--mono);margin-bottom:3px">🧠 Learning active</div>'
-      + '<div style="display:flex;flex-wrap:wrap;gap:4px">'+lwParts+'</div></div>';
-  }
-  if (!s) {
-    if (activeW.length > 0) { el.style.display = 'block'; el.innerHTML = learnHtml; }
-    else { el.style.display = 'none'; }
-    return;
-  }
-  el.style.display = 'block';
-  var hasUsdt  = s.totalUSDT != null;
-  var mainVal  = hasUsdt ? (s.totalUSDT >= 0 ? '+' : '') + s.totalUSDT + ' USDT' : (s.totalPnl >= 0 ? '+' : '') + s.totalPnl + '%';
-  var mainCol  = (hasUsdt ? s.totalUSDT : s.totalPnl) >= 0 ? 'var(--green)' : 'var(--red)';
-  var wrPct    = s.count > 0 ? Math.round(s.wins / s.count * 100) : 0;
-  var wrCol    = wrPct >= 60 ? 'var(--green)' : wrPct >= 45 ? 'var(--amber)' : 'var(--red)';
-  var bestVal  = s.best && s.best.realizedUSDT != null ? (s.best.realizedUSDT >= 0 ? '+' : '') + s.best.realizedUSDT + 'U' : '';
-  el.innerHTML = '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);font-family:var(--mono);margin-bottom:5px">Session (24h)</div>'    + '<div style="font-size:18px;font-weight:700;color:' + mainCol + ';font-family:var(--mono);line-height:1">' + mainVal + '</div>'    + '<div style="font-size:10px;font-family:var(--mono);color:var(--text3);margin-top:4px;display:flex;gap:8px;align-items:center">'    + '<span>' + s.count + ' trades</span>'    + '<span style="color:' + wrCol + ';font-weight:600">' + wrPct + '% WR</span>'    + (bestVal ? '<span style="color:var(--green)">best ' + bestVal + '</span>' : '')    + '</div>'
-    + learnHtml;
+  if (el) el.style.display = 'none';
 }
-console.log('[SCRIPT] AFTER_SESSION_PNL');
 
 function showTradeLog() {
   tradeLogView = true;
@@ -2957,15 +2855,8 @@ async function renderDetail(coin,klines,mtfData){
   const lNote=entryMode==='optimal'&&entries.pullbackPct>0.05?`<div class="opt-note">Wait for pullback ${entries.pullbackPct.toFixed(2)}% → $${fn(setup.lE,dec)}</div>`:'';
   const sNote=entryMode==='optimal'&&entries.rallyPct>0.05?`<div class="opt-note">Wait for rally ${entries.rallyPct.toFixed(2)}% → $${fn(setup.sE,dec)}</div>`:'';
 
-  var _adjSc = applyLearningWeight(sc, 'swing');
-  var _hasAdj = Math.abs(_adjSc - sc) >= 0.1;
-  var _lwD = getLearnedWeights();
-  var _lwTip = Object.keys(_lwD).filter(function(t){return _lwD[t].active;}).map(function(t){
-    return _lwD[t].label+' '+(_lwD[t].weight>=1?'+':'')+(((_lwD[t].weight-1)*100).toFixed(0))+'% '+(_lwD[t].winRate||'?')+'% WR';
-  }).join(' | ') || 'Need 8+ trades per type';
-  var _scHtmlInner = _hasAdj ? sc+' → '+_adjSc : String(sc);
-  var _scoreHtml = '<div class="score-num" style="color:'+scColor+'" title="'+_lwTip+'">' + _scHtmlInner + '<span style="font-size:15px;color:var(--text3)">/10</span></div>'
-    + '<div class="score-lbl">'+(_hasAdj?'🧠 Adjusted':'Signal score')+'</div>';
+  var _scoreHtml = '<div class="score-num" style="color:'+scColor+'">' + sc + '<span style="font-size:15px;color:var(--text3)">/10</span></div>'
+    + '<div class="score-lbl">Signal score</div>';
   var _lockSty='font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono)';
   var _lockInf='font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px';
   var _lDir=isLocked&&lockedSig&&lockedSig.lockedSetup?lockedSig.lockedSetup.direction:null;
@@ -3539,20 +3430,16 @@ function checkForRealSweep(sig, currentPrice) {
 }
 
 async function init(){
-  console.log("[INIT] function called");
   const btn=document.getElementById('rbtn');
   btn.disabled=true;btn.textContent='↻ Refreshing...';
   klCache={};aiCache={};
-  console.log('[INIT] 1 klCache cleared');
   try{loadSwingSignals();}catch(e){alert('loadSwingSignals: '+e.message);}
   try{loadTradeLog();}catch(e){alert('loadTradeLog: '+e.message);}
   try{seedInitialTrades();}catch(e){alert('seedInitialTrades: '+e.message);}
   try{seedPlaceholders();}catch(e){alert('seedPlaceholders: '+e.message);}
   const scores={};Object.keys(COINS).forEach(c=>{scores[c]=5;});
-  console.log('[INIT] 2 about to renderSidebar');
   try{renderSidebar(scores);}catch(e){alert('renderSidebar: '+e.message); console.error(e);}
   try{renderAlerts(scores);}catch(e){console.error(e);}
-  console.log('[INIT] 3 sidebar done');
   const trackedSyms = Object.values(COINS).map(c=>c.sym);
   if (!SKIP_WS) {
     connectBybitWS(trackedSyms);
@@ -3587,7 +3474,6 @@ async function init(){
       new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
     ]);
     const source = await marketPromise;
-    console.log('[INIT] 4 market done src='+source);
     try{
       const fg=await fetchWithTimeout('https://api.alternative.me/fng/?limit=1',4000);
       const val=parseInt(fg.data[0]?.value||50);
@@ -3601,15 +3487,12 @@ async function init(){
   try{
     // On mobile only fetch active coin klines — fetch others in background after render
     const coinsToFetch = IS_MOBILE ? [activeCoin] : Object.keys(COINS);
-    console.log('[INIT] 5 fetching klines...');
     const allKlineResults = await Promise.allSettled(
       coinsToFetch.map(c => fetchKlines(c, activeTF))
     );
     const klines = klCache[activeCoin+'_'+activeTF] || [];
-    console.log('[INIT] 6 klines='+klines.length);
     let mtfData=null;
     if(!IS_MOBILE){
-      console.log('[INIT] 7 MTF start');
       try{
         const mtfKlines=await fetchMTFKlines(activeCoin);
         mtfData=calcMTFAnalysis(mtfKlines);
@@ -3621,9 +3504,7 @@ async function init(){
       newScores[c]=scoreSignal(c,calcTA(kl),null);
     });
     renderSidebar(newScores);renderAlerts(newScores);
-    console.log('[INIT] 8 renderDetail start');
     try{ await renderDetail(activeCoin,klines,mtfData); }catch(e){ alert('renderDetail: '+e.message); console.error(e); }
-    console.log('[INIT] 9 renderDetail done');
     cleanupLiqQueue();
     const wsEl=document.getElementById('ws-status');
     if(wsEl) wsEl.innerHTML=getWSStatusHTML();
