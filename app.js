@@ -1557,15 +1557,28 @@ function scoreSignal(coin,ta,mtf){
   var liqPts = liqEvents.length>=10?3:liqEvents.length>=5?2:liqEvents.length>=2?1:0;
   s+=liqPts; breakdown.liq=liqPts;
 
-  // 2. CVD DIVERGENCE / FLIP (25% — real order flow)
+  // 2. CVD DIVERGENCE / CONFIRMATION (25% — real order flow)
+  // Divergence = price moving one way, money flowing the other = highest conviction
   var cvd=window._lastCvdData;
   var cvdPts=0;
+  var signalDir = ta.trend==='bullish'||ta.trend==='mild-bullish' ? 'long' : 'short'; // default from trend
   if(cvd){
-    if(cvd.divergence)cvdPts=2;
-    else if(cvd.trend==='bullish'&&ta.trend!=='bearish')cvdPts=1;
-    else if(cvd.trend==='bearish'&&ta.trend!=='bullish')cvdPts=1;
+    var buyPct  = parseFloat(cvd.buyPct)  || 50;
+    var sellPct = parseFloat(cvd.sellPct) || 50;
+    var priceBullish = ta.trend==='bullish'||ta.trend==='mild-bullish';
+    var priceBearish = ta.trend==='bearish'||ta.trend==='mild-bearish';
+    // Strong divergence: price going one way, money strongly the other
+    var strongBearishDiv = priceBullish && sellPct >= 53; // price up, sellers dominant → short signal
+    var strongBullishDiv = priceBearish && buyPct  >= 53; // price down, buyers dominant → long signal
+    if(strongBearishDiv){ cvdPts=3; signalDir='short'; }       // strongest signal — fade the move
+    else if(strongBullishDiv){ cvdPts=3; signalDir='long'; }   // strongest signal — fade the move
+    else if(cvd.divergence){ cvdPts=2; }                        // pre-computed divergence
+    else if(cvd.trend==='bullish'&&priceBullish){ cvdPts=1; signalDir='long'; }   // confirms trend
+    else if(cvd.trend==='bearish'&&priceBearish){ cvdPts=1; signalDir='short'; }  // confirms trend
+    // CVD mild contradiction or neutral → 0, keep trend direction
   }
   s+=cvdPts; breakdown.cvd=cvdPts;
+  window._lastSignalDir = signalDir; // store for verdictOf
 
   // 3. MTF CONFLUENCE (20% — prevents trend-fighting)
   var mtfPts=0;
@@ -1620,28 +1633,31 @@ function scoreSignal(coin,ta,mtf){
 }
 
 function verdictOf(sc, ta, cvd){
-  // ta and cvd optional — falls back gracefully if not passed
-  var trend = ta ? ta.trend : 'neutral';
+  // Use CVD-computed signal direction if available (set by scoreSignal)
+  var sigDir = window._lastSignalDir || (ta && (ta.trend==='bullish'||ta.trend==='mild-bullish') ? 'long' : 'short');
+  var isLong  = sigDir === 'long';
   var cvdTrend = cvd ? cvd.trend : null;
-  var isBull = trend==='bullish'||trend==='mild-bullish';
-  var isBear = trend==='bearish'||trend==='mild-bearish';
-  var cvdAgreesLong  = cvdTrend==='bullish'||cvdTrend===null;
-  var cvdAgreesShort = cvdTrend==='bearish'||cvdTrend===null;
+  var trendDir = ta && (ta.trend==='bullish'||ta.trend==='mild-bullish') ? 'long' : 'short';
+  // Counter-trend = CVD signal opposes price trend
+  var isCounterTrend = sigDir !== trendDir;
 
   if(sc>=7){
-    if(isBull&&cvdAgreesLong)  return{text:'⚡ Long setup', cls:'cbl'};
-    if(isBear&&cvdAgreesShort) return{text:'⚡ Short setup',cls:'cbs'};
-    if(isBull&&!cvdAgreesLong) return{text:'⚠ Counter-trend Long', cls:'cbw'};
-    if(isBear&&!cvdAgreesShort)return{text:'⚠ Counter-trend Short',cls:'cbw'};
-    return{text:'⚡ High score',cls:'cbl'};
+    if(isLong)  return isCounterTrend
+      ? {text:'⚠ Counter Long',  cls:'cbw'}
+      : {text:'⚡ Long setup',   cls:'cbl'};
+    return isCounterTrend
+      ? {text:'⚠ Counter Short', cls:'cbw'}
+      : {text:'⚡ Short setup',  cls:'cbs'};
   }
   if(sc>=5){
-    if(isBull)return{text:'👁 Watch Long', cls:'cbw'};
-    if(isBear)return{text:'👁 Watch Short',cls:'cbw'};
-    return{text:'👁 Watch',cls:'cbw'};
+    if(isLong)  return isCounterTrend
+      ? {text:'👁 Watch Short (div)', cls:'cbw'}  // divergence watch
+      : {text:'👁 Watch Long',  cls:'cbw'};
+    return isCounterTrend
+      ? {text:'👁 Watch Long (div)',  cls:'cbw'}  // divergence watch
+      : {text:'👁 Watch Short', cls:'cbw'};
   }
-  if(sc>=3)return{text:'Neutral',cls:'cbn'};
-  return{text:'No signal',cls:'cbn'};
+  return{text:'Neutral', cls:'cbn'};
 }
 
 async function setLev(lev,btn){
@@ -2980,6 +2996,7 @@ function copySignalSnapshot() {
     'Price:   $'+fn(d.price,dec)+'  ('+fp(d.change24h||0)+')',
     'Score:   '+sc+'/10  — '+(bdLine||'no breakdown'),
     'Verdict: '+(verdictOf(sc,ta,cvd).text||'—'),
+    'Signal dir: '+(window._lastSignalDir||'—')+(window._lastSignalDir!=(ta.trend==='bullish'||ta.trend==='mild-bullish'?'long':'short')?' ⚠ CVD divergence overrides trend':''),
     '',
     '— INDICATORS —',
     'RSI:      '+((ta.rsi||0).toFixed(1))+(ta.rsi>70?' ⚠ overbought':ta.rsi<30?' ⚠ oversold':''),
