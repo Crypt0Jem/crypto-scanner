@@ -3540,6 +3540,9 @@ function checkForRealSweep(sig, currentPrice) {
 
 async function init(){
   console.log("[INIT] function called");
+  // DIAGNOSTIC: write to DOM immediately so we know init() ran even without console
+  var _diagEl = document.getElementById('main-content');
+  if (_diagEl) _diagEl.innerHTML = '<div style="background:#0a1628;color:#00e5bb;padding:20px;font-family:monospace;font-size:13px">⚡ init() started — loading...</div>';
   const btn=document.getElementById('rbtn');
   btn.disabled=true;btn.textContent='↻ Refreshing...';
   klCache={};aiCache={};
@@ -3633,7 +3636,8 @@ async function init(){
   }
   btn.disabled=false;btn.textContent='↻ Refresh all data';
 }
-init();
+console.log('[SCRIPT] PRE_INIT — about to call init()');
+init().catch(function(e){ console.error('[INIT] UNCAUGHT ERROR:', e); });
 
 // ── Post-Sweep Confirmation detection (for 75x-125x entries) ────────────────
 // A sweep is confirmed when a candle wicked through a liq zone AND closed back.
