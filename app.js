@@ -970,7 +970,17 @@ function calcTA(klines){
   const maxVol=Math.max(...volProfile.map(b=>b.vol));
   volProfile.forEach(b=>{b.pct=maxVol>0?b.vol/maxVol:0;});
   const poc=volProfile.reduce((a,b)=>b.vol>a.vol?b:a,volProfile[0]).price;
-  return{rsi,ema20,ema50,atr,trend,support,resistance,volProfile,poc};
+
+  // Volume spike: last candle vs 20-bar median (used by scoreSignal)
+  var vols20 = klines.slice(-21,-1).map(function(k){return k.v;}).sort(function(a,b){return a-b;});
+  var medVol  = vols20[Math.floor(vols20.length/2)] || 1;
+  var volumeSpike = +(klines[klines.length-1].v / medVol).toFixed(2);
+
+  // Taker ratio from CVD data if available (buyPct from window._lastCvdData)
+  var cvdSnap = window._lastCvdData;
+  var takerBuyPct = cvdSnap && cvdSnap.buyPct ? parseFloat(cvdSnap.buyPct) : 50;
+
+  return{rsi,ema20,ema50,atr,trend,support,resistance,volProfile,poc,volumeSpike,takerBuyPct};
 }
 
 function calcEntries(price,ta,dec){
@@ -1517,63 +1527,121 @@ async function fetchCVDData(coin, tf) {
   }
 }
 
-function scoreSignal(coin,ta,mtf){
-  const d=mktData[coin];if(!d)return 0;
-  let s=0;
-
-  // 1. LIQ ZONE PROXIMITY (35% weight — best performer)
-  // Scored in renderDetail when sweep is detected; add base liq awareness here
-  const sym=(COINS[coin]||{}).sym||coin+'USDT';
-  const liqEvents=bybitLiqQueue.filter(function(ev){
-    return ev.symbol===sym && ev.timestamp>Date.now()-14400000;
-  });
-  if(liqEvents.length>=10)s+=3;
-  else if(liqEvents.length>=5)s+=2;
-  else if(liqEvents.length>=2)s+=1;
-
-  // 2. CVD DIVERGENCE / FLIP (25% weight — real order flow)
-  // CVD data passed in via window._lastCvdData when available
-  const cvd=window._lastCvdData;
-  if(cvd){
-    if(cvd.divergence)s+=2;                         // price/flow disagree = opportunity
-    else if(cvd.trend==='bullish'&&ta.trend!=='bearish')s+=1;
-    else if(cvd.trend==='bearish'&&ta.trend!=='bullish')s+=1;
-  }
-
-  // 3. MTF CONFLUENCE (20% weight — prevents trend-fighting)
-  if(mtf){
-    s+=mtf.confluenceScore;                          // +3 strong, +2 good, +1 partial, -1 conflicted
-    if(mtf.positionSizeMultiplier<0.5)s=Math.max(0,s-3);  // counter-trend penalty
-    else if(mtf.positionSizeMultiplier<1)s=Math.max(0,s-1);
-  }
-
-  // 4. VOLUME SPIKE ON WICK (10% weight — confirms real sweep vs noise)
-  if(ta.volumeSpike&&ta.volumeSpike>=2.8)s+=2;
-  else if(ta.volumeSpike&&ta.volumeSpike>=1.8)s+=1;
-
-  // 5. FUNDING MOMENTUM (5% weight — sentiment tailwind)
-  const fMom=sym?calcFundingMomentum(fundingHistoryCache[sym]||[]):null;
-  if(fMom){
-    if(fMom.flipped)s+=1;
-    if(fMom.momentum==='accelerating_negative')s+=1;
-  }
-
-  // 6. RSI EXTREME ONLY (5% weight — tie-breaker, not primary)
-  if(ta.rsi<30)s+=1;       // oversold extreme only
-  else if(ta.rsi>70)s+=1;  // overbought extreme only
-
-  // OI spike penalty — forced liqs = unreliable signal
-  const oiM=sym?calcOIMomentum(sym):null;
-  if(oiM&&oiM.spike)s=Math.max(0,s-1);
-
-  return Math.min(10,Math.max(0,Math.round(s)));
+// Fetch order book imbalance near liq cluster — public endpoint, no key needed
+async function fetchOrderBook(sym, clusterPrice) {
+  try {
+    var r = await fetchWithTimeout(
+      'https://api.bybit.com/v5/market/orderbook?category=linear&symbol=' + sym + '&limit=50', 4000
+    );
+    var bids = r?.result?.b || [];
+    var asks = r?.result?.a || [];
+    var range = clusterPrice * 0.008; // 0.8% around cluster
+    var bidVol = 0, askVol = 0;
+    bids.forEach(function(b) { if (Math.abs(parseFloat(b[0]) - clusterPrice) <= range) bidVol += parseFloat(b[1]); });
+    asks.forEach(function(a) { if (Math.abs(parseFloat(a[0]) - clusterPrice) <= range) askVol += parseFloat(a[1]); });
+    var total = bidVol + askVol || 1;
+    return { bidVol:bidVol, askVol:askVol, imbalance:+((bidVol-askVol)/total*100).toFixed(1) };
+  } catch(e) { return null; }
 }
 
-function verdictOf(sc){
-  if(sc>=7)return{text:'Long setup',cls:'cbl'};
-  if(sc>=5)return{text:'Watch',cls:'cbw'};
+function scoreSignal(coin,ta,mtf){
+  const d=mktData[coin];if(!d)return 0;
+  var breakdown = {}; // track each factor for display
+  var s=0;
+
+  // 1. LIQ ZONE PROXIMITY (35% — best performer)
+  var sym=(COINS[coin]||{}).sym||coin+'USDT';
+  var liqEvents=bybitLiqQueue.filter(function(ev){
+    return ev.symbol===sym && ev.timestamp>Date.now()-14400000;
+  });
+  var liqPts = liqEvents.length>=10?3:liqEvents.length>=5?2:liqEvents.length>=2?1:0;
+  s+=liqPts; breakdown.liq=liqPts;
+
+  // 2. CVD DIVERGENCE / FLIP (25% — real order flow)
+  var cvd=window._lastCvdData;
+  var cvdPts=0;
+  if(cvd){
+    if(cvd.divergence)cvdPts=2;
+    else if(cvd.trend==='bullish'&&ta.trend!=='bearish')cvdPts=1;
+    else if(cvd.trend==='bearish'&&ta.trend!=='bullish')cvdPts=1;
+  }
+  s+=cvdPts; breakdown.cvd=cvdPts;
+
+  // 3. MTF CONFLUENCE (20% — prevents trend-fighting)
+  var mtfPts=0;
+  if(mtf){
+    mtfPts=mtf.confluenceScore||0;
+    if(mtf.positionSizeMultiplier<0.5)s=Math.max(0,s-3);
+    else if(mtf.positionSizeMultiplier<1)s=Math.max(0,s-1);
+  }
+  s+=mtfPts; breakdown.mtf=mtfPts;
+
+  // 4. VOLUME SPIKE (10% — confirms real sweep vs noise)
+  var volPts = ta.volumeSpike>=2.8?2:ta.volumeSpike>=1.8?1:0;
+  s+=volPts; breakdown.vol=volPts;
+
+  // 5. TAKER BUY/SELL RATIO (5% — directional pressure)
+  var takerPts=0;
+  if(ta.takerBuyPct){
+    if(ta.takerBuyPct>62)takerPts=1;       // strong buy pressure
+    else if(ta.takerBuyPct<38)takerPts=1;  // strong sell pressure (short signal)
+  }
+  s+=takerPts; breakdown.taker=takerPts;
+
+  // 6. SESSION QUALITY (replaces raw RSI — timing matters)
+  var utcHour=new Date().getUTCHours();
+  var sessionPts=0;
+  var inLondon=utcHour>=8&&utcHour<16;
+  var inNY=utcHour>=13&&utcHour<21;
+  var inAsia=utcHour>=0&&utcHour<8;
+  if(inLondon&&inNY)sessionPts=2;        // overlap = best liquidity
+  else if(inLondon||inNY)sessionPts=1;   // single session = good
+  else if(inAsia&&ta.volumeSpike<1.5)sessionPts=-1; // Asia low volume = penalty
+  // Asia high volume = neutral (0) — don't punish real moves
+  s+=sessionPts; breakdown.session=sessionPts;
+
+  // 7. RSI EXTREME ONLY (tie-breaker)
+  var rsiPts=ta.rsi<30||ta.rsi>70?1:0;
+  s+=rsiPts; breakdown.rsi=rsiPts;
+
+  // 8. ORDER BOOK IMBALANCE near liq zone (bonus if available)
+  var ob=window._lastOB;
+  var obPts=0;
+  if(ob&&Math.abs(ob.imbalance)>20)obPts=1;
+  s+=obPts; breakdown.ob=obPts;
+
+  // OI spike penalty
+  var oiM=sym?calcOIMomentum(sym):null;
+  if(oiM&&oiM.spike){ s=Math.max(0,s-1); breakdown.oiPenalty=-1; }
+
+  var final=Math.min(10,Math.max(0,Math.round(s)));
+  window._lastScoreBreakdown=breakdown; // store for display
+  return final;
+}
+
+function verdictOf(sc, ta, cvd){
+  // ta and cvd optional — falls back gracefully if not passed
+  var trend = ta ? ta.trend : 'neutral';
+  var cvdTrend = cvd ? cvd.trend : null;
+  var isBull = trend==='bullish'||trend==='mild-bullish';
+  var isBear = trend==='bearish'||trend==='mild-bearish';
+  var cvdAgreesLong  = cvdTrend==='bullish'||cvdTrend===null;
+  var cvdAgreesShort = cvdTrend==='bearish'||cvdTrend===null;
+
+  if(sc>=7){
+    if(isBull&&cvdAgreesLong)  return{text:'⚡ Long setup', cls:'cbl'};
+    if(isBear&&cvdAgreesShort) return{text:'⚡ Short setup',cls:'cbs'};
+    if(isBull&&!cvdAgreesLong) return{text:'⚠ Counter-trend Long', cls:'cbw'};
+    if(isBear&&!cvdAgreesShort)return{text:'⚠ Counter-trend Short',cls:'cbw'};
+    return{text:'⚡ High score',cls:'cbl'};
+  }
+  if(sc>=5){
+    if(isBull)return{text:'👁 Watch Long', cls:'cbw'};
+    if(isBear)return{text:'👁 Watch Short',cls:'cbw'};
+    return{text:'👁 Watch',cls:'cbw'};
+  }
   if(sc>=3)return{text:'Neutral',cls:'cbn'};
-  return{text:'Short bias',cls:'cbs'};
+  return{text:'No signal',cls:'cbn'};
 }
 
 async function setLev(lev,btn){
@@ -2234,7 +2302,7 @@ async function renderDetail(coin,klines,mtfData){
   let liqZones=null;
   try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
   catch(e){ console.warn('LiqZones failed:',e); }
-  const v=verdictOf(sc);
+  const v=verdictOf(sc,ta,window._lastCvdData);
   const entries=calcEntries(d.price,ta,dec);
   const freshSetup=calcSetups(entries,dec);
 
@@ -2355,6 +2423,15 @@ async function renderDetail(coin,klines,mtfData){
         <div class="score-lbl">Signal score</div>
       </div>
     </div>
+    ${(function(){
+      var bd=window._lastScoreBreakdown||{};
+      var labels={liq:'Liq zones',cvd:'CVD',mtf:'MTF',vol:'Volume',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI'};
+      var items=Object.keys(bd).filter(function(k){return bd[k]!==0;}).map(function(k){
+        var pts=bd[k];var col=pts>0?'var(--green)':pts<0?'var(--red)':'var(--text3)';
+        return '<span style="font-size:9px;font-family:var(--mono);color:'+col+';background:rgba(255,255,255,0.05);padding:2px 5px;border-radius:3px">'+(labels[k]||k)+' '+(pts>0?'+':'')+pts+'</span>';
+      }).join('');
+      return items?'<div style="padding:8px 20px;display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border)">'+items+'</div>':'';
+    })()}
 
     <div class="entry-toggle">
       <span class="et-label">Entry mode:</span>
@@ -2606,6 +2683,11 @@ async function renderDetail(coin,klines,mtfData){
   pendingAIContext = {coin, ta, sc, setup, klines, mtfData, liqZones, cvdData};
   window._lastCvdData = cvdData;
   window._lastTA = ta;
+  // Fetch order book in background (fire-and-forget, used by scoreSignal next render)
+  if(liqZones){
+    var obCluster = (liqZones.longLiqZones||[])[0]||{price:d.price};
+    fetchOrderBook(bybitSym, obCluster.price).then(function(ob){ window._lastOB=ob; }).catch(function(){});
+  }
 
   // Phase 2 re-eval
   if(activeMode==='swing' && lockedSig && !lockedSig.isSecondary){
@@ -2634,7 +2716,7 @@ function renderScanBody(){
   }).sort((a,b)=>b.sc-a.sc);
   const bc=sc=>sc>=7?'var(--green)':sc>=5?'var(--amber)':'var(--red)';
   tbody.innerHTML=rows.map(({c,sc,d,ta})=>{
-    const v=verdictOf(sc);const dec=COINS[c].dec;const ch=d.change24h||0;
+    const v=verdictOf(sc,ta,null);const dec=COINS[c].dec;const ch=d.change24h||0;
     let tl='Neutral';
     if(ta.trend==='bullish')tl='Bullish';else if(ta.trend==='mild-bullish')tl='Mild bull';
     else if(ta.trend==='bearish')tl='Bearish';else if(ta.trend==='mild-bearish')tl='Mild bear';
