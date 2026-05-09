@@ -41,6 +41,100 @@ let liqHeatmapOn = false;
 let tradeLog = [];
 let tradeLogView = false; // true = showing trade log, false = showing scanner
 
+// ── Learning System (Bayesian) ────────────────────────────────────────────────
+function calculateSignalWeight(signalType) {
+  var trades = tradeLog.filter(function(t) {
+    return t.status !== 'open' && t.signalType === signalType;
+  });
+  var n = trades.length;
+  if (n < 8) return 1.0; // need 8+ trades to activate
+  var wins = trades.filter(function(t) {
+    return t.realizedUSDT != null ? t.realizedUSDT > 0 : (t.pnlPercent || 0) > 0;
+  }).length;
+  var postAlpha = 2 + wins;
+  var postBeta  = 3 + (n - wins);
+  var bayesWR   = postAlpha / (postAlpha + postBeta);
+  return +Math.max(0.60, Math.min(1.40, 0.3 + 0.7 * bayesWR)).toFixed(3);
+}
+
+function applyLearningWeight(rawScore, signalType) {
+  var w = calculateSignalWeight(signalType || 'swing');
+  return +Math.min(10, Math.max(0, rawScore * w)).toFixed(1);
+}
+
+function getLearnedWeights() {
+  var types  = ['swing','scalp','post_sweep','liq_scale','sweep_opp'];
+  var labels = { swing:'Swing', scalp:'Scalp', post_sweep:'Post-Sweep', liq_scale:'Scale-In', sweep_opp:'Sweep Opp' };
+  var out = {};
+  types.forEach(function(t) {
+    var trades = tradeLog.filter(function(x) { return x.status !== 'open' && x.signalType === t; });
+    var n = trades.length;
+    var w = calculateSignalWeight(t);
+    var wins = n > 0 ? trades.filter(function(x) {
+      return x.realizedUSDT != null ? x.realizedUSDT > 0 : (x.pnlPercent || 0) > 0;
+    }).length : 0;
+    out[t] = { weight:w, tradeCount:n, winRate: n>0 ? +(wins/n*100).toFixed(0) : null, active: n>=8, label: labels[t]||t };
+  });
+  return out;
+}
+
+function getSessionStats(hoursBack) {
+  var cutoff = Date.now() - (hoursBack || 24) * 3600000;
+  var recent = tradeLog.filter(function(t) { return t.status !== 'open' && t.timestamp >= cutoff; });
+  if (!recent.length) return null;
+  var isWin = function(t) { return t.realizedUSDT != null ? t.realizedUSDT > 0 : (t.pnlPercent || 0) > 0; };
+  var wins  = recent.filter(isWin).length;
+  var usdtList  = recent.filter(function(t) { return t.realizedUSDT != null; });
+  var totalUSDT = usdtList.length > 0 ? +usdtList.reduce(function(s,t){ return s+t.realizedUSDT; },0).toFixed(2) : null;
+  var totalPnl  = +recent.reduce(function(s,t){ return s+(t.pnlPercent||0); },0).toFixed(1);
+  var best = recent.reduce(function(a,b){
+    return ((b.realizedUSDT!=null?b.realizedUSDT:b.pnlPercent||0) > (a.realizedUSDT!=null?a.realizedUSDT:a.pnlPercent||0)) ? b : a;
+  }, recent[0]);
+  return { count:recent.length, wins:wins, losses:recent.length-wins, totalUSDT:totalUSDT, totalPnl:totalPnl, best:best };
+}
+
+function renderSessionPnl() {
+  var el = document.getElementById('session-pnl-panel');
+  if (!el) return;
+  var s  = getSessionStats(24);
+  var lw = getLearnedWeights();
+  var activeW = Object.keys(lw).filter(function(t){ return lw[t].active; });
+  var learnHtml = '';
+  if (activeW.length > 0) {
+    var parts = activeW.map(function(t) {
+      var pct = ((lw[t].weight - 1) * 100).toFixed(0);
+      var col = lw[t].weight >= 1 ? 'var(--green)' : 'var(--amber)';
+      return '<span style="color:'+col+';font-size:9px;font-family:var(--mono)">'
+        + lw[t].label + ' ' + (lw[t].weight >= 1 ? '+' : '') + pct + '%</span>';
+    }).join(' ');
+    learnHtml = '<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)">'
+      + '<div style="font-size:9px;color:var(--purple);font-family:var(--mono);margin-bottom:3px">🧠 Learning active</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:4px">' + parts + '</div></div>';
+  }
+  if (!s) {
+    el.style.display = activeW.length > 0 ? 'block' : 'none';
+    if (activeW.length > 0) el.innerHTML = learnHtml;
+    return;
+  }
+  var hasUsdt = s.totalUSDT != null;
+  var mainVal = hasUsdt ? (s.totalUSDT >= 0 ? '+' : '') + s.totalUSDT + ' USDT'
+                        : (s.totalPnl  >= 0 ? '+' : '') + s.totalPnl  + '%';
+  var mainCol = (hasUsdt ? s.totalUSDT : s.totalPnl) >= 0 ? 'var(--green)' : 'var(--red)';
+  var wrPct   = s.count > 0 ? Math.round(s.wins / s.count * 100) : 0;
+  var wrCol   = wrPct >= 60 ? 'var(--green)' : wrPct >= 45 ? 'var(--amber)' : 'var(--red)';
+  var bestVal = s.best && s.best.realizedUSDT != null
+    ? (s.best.realizedUSDT >= 0 ? '+' : '') + s.best.realizedUSDT + 'U' : '';
+  el.style.display = 'block';
+  el.innerHTML = '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);font-family:var(--mono);margin-bottom:5px">Session (24h)</div>'
+    + '<div style="font-size:18px;font-weight:700;color:' + mainCol + ';font-family:var(--mono);line-height:1">' + mainVal + '</div>'
+    + '<div style="font-size:10px;font-family:var(--mono);color:var(--text3);margin-top:4px;display:flex;gap:8px;align-items:center">'
+    + '<span>' + s.count + ' trades</span>'
+    + '<span style="color:' + wrCol + ';font-weight:600">' + wrPct + '% WR</span>'
+    + (bestVal ? '<span style="color:var(--green)">best ' + bestVal + '</span>' : '')
+    + '</div>' + learnHtml;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function loadTradeLog() {
   try {
     const raw = localStorage.getItem('tradeLog_v1');
@@ -2206,6 +2300,7 @@ function renderMTFCard(mtf, dec) {
 }
 
 function renderSidebar(scores){
+  renderSessionPnl();
   const sorted=Object.keys(COINS).map(c=>({c,sc:scores[c]||0})).sort((a,b)=>b.sc-a.sc);
   document.getElementById('coin-list').innerHTML=sorted.map(({c,sc})=>{
     const d=mktData[c]||{};const v=verdictOf(sc);
@@ -2223,7 +2318,7 @@ function renderAlerts(scores){
   const fired=Object.entries(scores).filter(([,sc])=>sc>=7);
   const el=document.getElementById('alerts-bar');
   if(!fired.length){el.innerHTML='';return;}
-  el.innerHTML=`<div class="alerts-bar"><span class="alert-lbl">High conviction</span>${fired.map(([c,sc])=>`<span class="alert-item">${c} — ${sc}/10 Long setup</span>`).join('')}</div>`;
+  el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('')+'</div>';
 }
 
 async function renderDetail(coin,klines,mtfData){
@@ -2440,10 +2535,10 @@ async function renderDetail(coin,klines,mtfData){
       <!-- Long setup -->
       <div class="card" style="border-left:3px solid var(--green)${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         <div class="card-title" style="color:var(--green);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-          <span>Long setup ${isLocked?`<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>`:''}
-          ${isLocked&&lockedSig?`<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">${lockedSig.dynamic.candlesElapsed} candle${lockedSig.dynamic.candlesElapsed!==1?'s':''} ago</span>`:''}
+          <span>Long setup ${isLocked?'<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>':''}
+          ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
           </span>
-          ${isLocked?`<button onclick="invalidateSignal('${coin}','${activeTF}','dismissed');selectCoin('${coin}')" style="font-size:9px;background:rgba(255,77,77,0.1);color:var(--red);border:1px solid var(--red-b);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">✕ Dismiss</button>`:''}
+          ${isLocked?'<button onclick="invalidateSignal(\''+coin+'\',\''+activeTF+'\',\'dismissed\');selectCoin(\''+coin+'\')" style="font-size:9px;background:rgba(255,77,77,0.1);color:var(--red);border:1px solid var(--red-b);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">✕ Dismiss</button>':''}
         </div>
         <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.lE,dec)}</span></div>
         <div class="srow" style="${setup.levAdjustedLong?'background:rgba(74,158,255,0.05);border-radius:6px;padding:6px 4px;margin-bottom:2px':''}">
@@ -2478,8 +2573,8 @@ async function renderDetail(coin,klines,mtfData){
       <!-- Short setup -->
       <div class="card" style="border-left:3px solid var(--red)${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         <div class="card-title" style="color:var(--red);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-          <span>Short setup ${isLocked?`<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>`:''}
-          ${isLocked&&lockedSig?`<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">${lockedSig.dynamic.candlesElapsed} candle${lockedSig.dynamic.candlesElapsed!==1?'s':''} ago</span>`:''}
+          <span>Short setup ${isLocked?'<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>':''}
+          ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
           </span>
         </div>
         <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.sE,dec)}</span></div>
@@ -3799,6 +3894,21 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
     }
   }
   if(patternEl){
+    var patternLevelsHtml = '';
+    if(pe.longEntry||pe.shortEntry){
+      patternLevelsHtml = '<div class="pattern-levels">'
+        + '<div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$'+fn(rPe.longEntry,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$'+fn(rPe.longStop,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$'+fn(rPe.longTP1,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$'+fn(rPe.longTP2,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$'+fn(rPe.shortEntry,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$'+fn(rPe.shortStop,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$'+fn(rPe.shortTP1,dec)+'</div></div>'
+        + '<div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$'+fn(rPe.shortTP2,dec)+'</div></div>'
+        + (pat.patternTarget?'<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$'+fn(pat.patternTarget,dec)+'</div></div>':'')
+        + (pat.patternInvalidation?'<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$'+fn(pat.patternInvalidation,dec)+'</div></div>':'')
+        + '</div>';
+    }
     patternEl.innerHTML=`
       <div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div>
       <div class="pattern-header">
@@ -3806,25 +3916,13 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         <div class="pattern-badges">
           <span class="pbadge ${confCls}">Confidence: ${pat.confidence||'—'}</span>
           <span class="pbadge pb-stage">${pat.stage||'—'}</span>
-          ${pat.historicalWinRate?`<span class="pbadge pb-winrate">Win rate: ${pat.historicalWinRate}</span>`:''}
+          ${pat.historicalWinRate?'<span class="pbadge pb-winrate">Win rate: '+pat.historicalWinRate+'</span>':''}
         </div>
       </div>
       <p class="pattern-desc">${pat.description||'—'}</p>
-      ${pe.longEntry||pe.shortEntry?`
-      <div class="pattern-levels">
-        <div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$${fn(rPe.longEntry,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$${fn(rPe.longStop,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$${fn(rPe.longTP1,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$${fn(rPe.longTP2,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$${fn(rPe.shortEntry,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$${fn(rPe.shortStop,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$${fn(rPe.shortTP1,dec)}</div></div>
-        <div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$${fn(rPe.shortTP2,dec)}</div></div>
-        ${pat.patternTarget?`<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$${fn(pat.patternTarget,dec)}</div></div>`:''}
-        ${pat.patternInvalidation?`<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$${fn(pat.patternInvalidation,dec)}</div></div>`:''}
-      </div>`:''}
-      ${ai.watchLevel?`<div class="watch-level">Watch level: ${ai.watchLevel}</div>`:''}
-      ${ai.suggestedAction?`<div class="action-level">Action: ${ai.suggestedAction}</div>`:''}
+      ${patternLevelsHtml}
+      ${ai.watchLevel?'<div class="watch-level">Watch level: '+ai.watchLevel+'</div>':''}
+      ${ai.suggestedAction?'<div class="action-level">Action: '+ai.suggestedAction+'</div>':''}
     `;
   }
   const cCol=ai.conviction==='high'?'var(--green)':ai.conviction==='medium'?'var(--amber)':'var(--text3)';
