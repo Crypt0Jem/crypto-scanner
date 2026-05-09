@@ -162,6 +162,64 @@ function deleteTrade(id) {
   showTradeLog();
 }
 
+function updateTrade(id) {
+  var idx = tradeLog.findIndex(function(t) { return t.id === id; });
+  if (idx === -1) return;
+  var t      = tradeLog[idx];
+  var entry  = parseFloat(document.getElementById('et-entry').value)  || t.entryPrice;
+  var exit   = parseFloat(document.getElementById('et-exit').value)   || t.exitPrice;
+  var lev    = parseInt(document.getElementById('et-lev').value)      || t.leverage;
+  var sig    = document.getElementById('et-sig').value;
+  var notes  = document.getElementById('et-notes').value;
+  var size   = parseFloat(document.getElementById('et-size').value)   || t.sizeUSDT || null;
+  var pnl    = (entry && exit) ? calcTradePnl(entry, exit, t.direction, lev) : t.pnlPercent;
+  var rusdT  = (size && pnl != null) ? +(pnl / 100 * size).toFixed(2) : t.realizedUSDT;
+  var status = exit ? 'closed' : 'open';
+  tradeLog[idx] = Object.assign({}, t, { entryPrice:entry, exitPrice:exit||null, pnlPercent:pnl, realizedUSDT:rusdT, sizeUSDT:size, leverage:lev, signalType:sig, notes:notes, status:status });
+  saveTradeLog();
+  showTradeLog();
+}
+
+function startEditTrade(id) {
+  var t = tradeLog.find(function(x) { return x.id === id; });
+  if (!t) return;
+  var row = document.getElementById('row-' + id);
+  if (!row) return;
+  var inp = 'background:var(--bg4);border:1px solid var(--border2);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 6px;';
+  var sigOpts = ['swing','scalp','post_sweep','liq_scale','sweep_opp','manual'].map(function(s) {
+    return '<option value="' + s + '"' + (t.signalType===s?' selected':'') + '>' + s + '</option>';
+  }).join('');
+  var levOpts = [10,25,50,75,100,125].map(function(l) {
+    return '<option value="' + l + '"' + (t.leverage===l?' selected':'') + '>' + l + 'x</option>';
+  }).join('');
+  row.innerHTML = '<td colspan="8" style="padding:10px 8px;background:rgba(74,158,255,0.06)">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
+    + '<input id="et-entry" type="number" step="any" value="' + (t.entryPrice||'') + '" placeholder="Entry" style="' + inp + 'width:90px">'
+    + '<input id="et-exit"  type="number" step="any" value="' + (t.exitPrice||'')  + '" placeholder="Exit (blank=open)" style="' + inp + 'width:110px">'
+    + '<input id="et-size"  type="number" step="any" value="' + (t.sizeUSDT||'')  + '" placeholder="Size USDT" style="' + inp + 'width:90px">'
+    + '<select id="et-lev" style="' + inp + '">' + levOpts + '</select>'
+    + '<select id="et-sig" style="' + inp + '">' + sigOpts + '</select>'
+    + '<input id="et-notes" type="text" value="' + (t.notes||'') + '" placeholder="Notes" style="' + inp + 'width:130px">'
+    + '<button onclick="updateTrade(\'' + id + '\')" style="padding:4px 10px;border-radius:4px;border:1px solid var(--green-b);background:rgba(0,208,132,0.1);color:var(--green);font-family:var(--mono);font-size:11px;cursor:pointer">Save</button>'
+    + '<button onclick="showTradeLog()" style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:var(--mono);font-size:11px;cursor:pointer">Cancel</button>'
+    + '</div></td>';
+}
+
+function closeTrade(id) {
+  var exitStr = prompt('Exit price for this trade?');
+  if (!exitStr) return;
+  var exit = parseFloat(exitStr);
+  if (!exit || exit <= 0) return;
+  var idx = tradeLog.findIndex(function(t) { return t.id === id; });
+  if (idx === -1) return;
+  var t   = tradeLog[idx];
+  var pnl = calcTradePnl(t.entryPrice, exit, t.direction, t.leverage);
+  var rusdT = t.sizeUSDT ? +(pnl / 100 * t.sizeUSDT).toFixed(2) : null;
+  tradeLog[idx] = Object.assign({}, t, { exitPrice:exit, pnlPercent:pnl, realizedUSDT:rusdT, status:'closed' });
+  saveTradeLog();
+  showTradeLog();
+}
+
 function calcTradePnl(entry, exit, direction, leverage) {
   if (!entry || !exit || entry <= 0) return 0;
   var raw = direction === 'long' ? (exit - entry) / entry : (entry - exit) / entry;
@@ -271,22 +329,61 @@ function showTradeLog() {
       + '</div>';
   }).join('');
 
-  // Trade rows
-  var rows = filtered.length === 0
-    ? '<tr><td colspan="7" style="text-align:center;color:var(--text3);font-family:var(--mono);font-size:12px;padding:20px">No trades logged yet</td></tr>'
-    : filtered.map(function(t) {
-        var pCol = t.pnlPercent > 0 ? 'var(--green)' : 'var(--red)';
+  // Open positions banner
+  var openTrades = tradeLog.filter(function(t) { return t.status === 'open'; });
+  var openHtml = '';
+  if (openTrades.length > 0) {
+    openHtml = '<div style="padding:14px 26px;border-bottom:1px solid var(--border);background:rgba(245,166,35,0.04)">'
+      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--amber);font-family:var(--mono);margin-bottom:10px">⚡ Open Positions (' + openTrades.length + ')</div>';
+    openTrades.forEach(function(t) {
+      var livePrice = (mktData[t.symbol] || {}).price || 0;
+      var dec = COINS[t.symbol] ? COINS[t.symbol].dec : 2;
+      var floatPct  = livePrice > 0 ? calcTradePnl(t.entryPrice, livePrice, t.direction, t.leverage) : null;
+      var floatUSDT = (floatPct != null && t.sizeUSDT) ? +(floatPct / 100 * t.sizeUSDT).toFixed(2) : null;
+      var fCol    = floatPct == null ? 'var(--text3)' : floatPct >= 0 ? 'var(--green)' : 'var(--red)';
+      var pctStr  = floatPct != null ? (floatPct >= 0 ? '+' : '') + floatPct.toFixed(2) + '%' : 'loading...';
+      var usdtStr = floatUSDT != null ? ' / ' + (floatUSDT >= 0 ? '+' : '') + floatUSDT + 'U' : '';
+      openHtml += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 14px;background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.25);border-radius:8px;margin-bottom:8px">'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+        + '<span style="font-size:12px;font-weight:700;font-family:var(--mono)">' + t.symbol + '</span>'
+        + (t.direction==='long' ? '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,208,132,0.12);color:var(--green);font-family:var(--mono)">▲ LONG</span>' : '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(255,77,77,0.12);color:var(--red);font-family:var(--mono)">▼ SHORT</span>')
+        + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">' + t.leverage + 'x</span>'
+        + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">in @ $' + fn(t.entryPrice,dec) + '</span>'
+        + (livePrice > 0 ? '<span style="font-size:10px;color:var(--text2);font-family:var(--mono)">now $' + fn(livePrice,dec) + '</span>' : '')
+        + '</div>'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        + '<span style="font-size:15px;font-weight:700;font-family:var(--mono);color:' + fCol + '">' + pctStr + '<span style="font-size:11px;font-weight:400;color:var(--text3)">' + usdtStr + '</span></span>'
+        + '<button onclick="closeTrade(\'' + t.id + '\')" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--green-b);background:rgba(0,208,132,0.1);color:var(--green);cursor:pointer;font-family:var(--mono);font-weight:600">✓ Close</button>'
+        + '<button onclick="startEditTrade(\'' + t.id + '\')" style="font-size:11px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:var(--mono)">✎</button>'
+        + '<button onclick="deleteTrade(\'' + t.id + '\')" style="font-size:11px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;font-family:var(--mono)">✕</button>'
+        + '</div></div>';
+    });
+    openHtml += '</div>';
+  }
+
+  // Closed trade rows
+  var closedFiltered = filtered.filter(function(t) { return t.status !== 'open'; });
+  var rows = closedFiltered.length === 0
+    ? '<tr><td colspan="8" style="text-align:center;color:var(--text3);font-family:var(--mono);font-size:12px;padding:20px">No closed trades yet</td></tr>'
+    : closedFiltered.map(function(t) {
+        var pCol  = t.pnlPercent > 0 ? 'var(--green)' : 'var(--red)';
         var pSign = t.pnlPercent > 0 ? '+' : '';
-        var dec = COINS[t.symbol] ? COINS[t.symbol].dec : 2;
-        return '<tr style="border-bottom:1px solid var(--border)">'
+        var dec   = COINS[t.symbol] ? COINS[t.symbol].dec : 2;
+        var usdtCell = t.realizedUSDT != null
+          ? '<span style="font-size:11px;font-family:var(--mono);color:' + (t.realizedUSDT>=0?'var(--green)':'var(--red)') + ';font-weight:600">' + (t.realizedUSDT>=0?'+':'') + t.realizedUSDT + 'U</span>'
+          : '<span style="color:var(--text3);font-size:10px;font-family:var(--mono)">—</span>';
+        return '<tr id="row-' + t.id + '" style="border-bottom:1px solid var(--border)">'
           + '<td style="font-size:11px;color:var(--text3);font-family:var(--mono);padding:8px 6px;white-space:nowrap">' + relTime(t.timestamp) + '</td>'
           + '<td style="padding:8px 6px"><span style="font-size:11px;font-weight:600;margin-right:5px">' + t.symbol + '</span>' + dirBadge(t.direction) + '</td>'
           + '<td style="font-size:11px;font-family:var(--mono);color:var(--text2);padding:8px 6px">' + fn(t.entryPrice,dec) + '<br><span style="color:var(--text3)">' + fn(t.exitPrice,dec) + '</span></td>'
           + '<td style="font-family:var(--mono);font-size:13px;font-weight:700;color:' + pCol + ';padding:8px 6px">' + pSign + t.pnlPercent + '%</td>'
+          + '<td style="padding:8px 6px">' + usdtCell + '</td>'
           + '<td style="font-size:11px;font-family:var(--mono);color:var(--text2);padding:8px 6px">' + t.leverage + 'x</td>'
           + '<td style="padding:8px 6px">' + sigBadge(t.signalType) + '</td>'
-          + '<td style="padding:8px 6px"><button onclick="deleteTrade(\'' + t.id + '\')" style="font-size:9px;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 6px;cursor:pointer;font-family:var(--mono)">✕</button></td>'
-          + '</tr>';
+          + '<td style="padding:8px 6px;white-space:nowrap">'
+          + '<button onclick="startEditTrade(\'' + t.id + '\')" style="font-size:9px;background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:3px;padding:2px 6px;cursor:pointer;font-family:var(--mono);margin-right:3px">✎</button>'
+          + '<button onclick="deleteTrade(\'' + t.id + '\')" style="font-size:9px;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 6px;cursor:pointer;font-family:var(--mono)">✕</button>'
+          + '</td></tr>';
       }).join('');
 
   // New trade form
@@ -308,14 +405,18 @@ function showTradeLog() {
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">'
     + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Entry price</div>'
     + '<input id="nt-entry" type="number" step="any" placeholder="0.00" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
-    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Exit price</div>'
-    + '<input id="nt-exit" type="number" step="any" placeholder="0.00" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
+    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Exit price <span style="color:var(--text3);font-size:9px">(blank = open)</span></div>'
+    + '<input id="nt-exit" type="number" step="any" placeholder="blank = open trade" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
     + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Signal type</div>'
     + '<select id="nt-sig" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px">'
     + '<option value="swing">Swing Lock</option><option value="scalp">Scalp</option><option value="post_sweep">Post-Sweep</option><option value="liq_scale">Liq Scale-In</option><option value="sweep_opp">Sweep Opp</option><option value="manual">Manual</option>'
     + '</select></div></div>'
-    + '<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Notes (optional)</div>'
-    + '<input id="nt-notes" type="text" placeholder="e.g. W pattern, stopped out before TP1..." style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Size USDT <span style="color:var(--text3);font-size:9px">(optional)</span></div>'
+    + '<input id="nt-size" type="number" step="any" placeholder="e.g. 500" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
+    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Notes (optional)</div>'
+    + '<input id="nt-notes" type="text" placeholder="e.g. W pattern, TP1 hit..." style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
+    + '</div>'
     + '<div style="display:flex;align-items:center;gap:8px">'
     + '<button onclick="submitNewTrade()" style="flex:1;padding:9px;border-radius:6px;border:1px solid var(--green-b);background:rgba(0,208,132,0.1);color:var(--green);font-family:var(--mono);font-size:12px;cursor:pointer;font-weight:500">+ Log Trade</button>'
     + '<div id="nt-pnl-preview" style="font-size:12px;font-family:var(--mono);color:var(--text3);min-width:80px;text-align:right"></div>'
@@ -353,6 +454,8 @@ function showTradeLog() {
     + (stats.worst ? '<div style="font-size:12px;font-family:var(--mono);color:var(--red);font-weight:600;margin-top:3px">' + stats.worst.pnlPercent + '% ' + stats.worst.symbol + '</div>' : '')
     + '</div>'
     + '</div>'
+
+    + openHtml
 
     // Main area: filters + table + breakdown
     + '<div style="padding:20px 26px;display:grid;grid-template-columns:1fr 280px;gap:20px">'
@@ -464,15 +567,15 @@ function submitNewTrade() {
   var dir   = document.getElementById('nt-dir')    ? document.getElementById('nt-dir').value    : 'long';
   var lev   = parseInt(document.getElementById('nt-lev') ? document.getElementById('nt-lev').value : '50');
   var entry = parseFloat(document.getElementById('nt-entry') ? document.getElementById('nt-entry').value : '');
-  var exit  = parseFloat(document.getElementById('nt-exit')  ? document.getElementById('nt-exit').value  : '');
+  var exit  = parseFloat(document.getElementById('nt-exit')  ? document.getElementById('nt-exit').value  : '') || null;
   var sig   = document.getElementById('nt-sig')   ? document.getElementById('nt-sig').value   : 'manual';
   var notes = document.getElementById('nt-notes') ? document.getElementById('nt-notes').value : '';
-  if (!entry || !exit || isNaN(entry) || isNaN(exit)) {
-    alert('Enter both entry and exit price');
-    return;
-  }
-  var pnl = calcTradePnl(entry, exit, dir, lev);
-  addTrade({ symbol:sym, direction:dir, entryPrice:entry, exitPrice:exit, pnlPercent:pnl, leverage:lev, signalType:sig, notes:notes });
+  var size  = parseFloat(document.getElementById('nt-size')  ? document.getElementById('nt-size').value  : '') || null;
+  if (!entry || isNaN(entry)) { alert('Entry price is required'); return; }
+  var pnl   = (exit && !isNaN(exit)) ? calcTradePnl(entry, exit, dir, lev) : null;
+  var rusdT = (pnl != null && size) ? +(pnl / 100 * size).toFixed(2) : null;
+  var status = exit ? 'closed' : 'open';
+  addTrade({ symbol:sym, direction:dir, entryPrice:entry, exitPrice:exit, pnlPercent:pnl, realizedUSDT:rusdT, sizeUSDT:size, leverage:lev, signalType:sig, notes:notes, status:status });
   showTradeLog();
 }
 
