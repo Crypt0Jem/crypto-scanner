@@ -68,50 +68,6 @@ function deleteTrade(id) {
   showTradeLog();
 }
 
-function updateTrade(id, data) {
-  var idx = tradeLog.findIndex(function(t) { return t.id === id; });
-  if (idx === -1) return;
-  tradeLog[idx] = Object.assign({}, tradeLog[idx], data);
-  saveTradeLog();
-}
-
-function startEditTrade(id) {
-  var t = tradeLog.find(function(x) { return x.id === id; });
-  if (!t) return;
-  window._editingTradeId = id;
-  var sym = document.getElementById('nt-symbol');
-  var dir = document.getElementById('nt-dir');
-  var lev = document.getElementById('nt-lev');
-  var ent = document.getElementById('nt-entry');
-  var ext = document.getElementById('nt-exit');
-  var sig = document.getElementById('nt-sig');
-  var not = document.getElementById('nt-notes');
-  var rus = document.getElementById('nt-realizedUSDT');
-  var osz = document.getElementById('nt-originalSize');
-  var btn = document.getElementById('nt-submit-btn');
-  var hdr = document.getElementById('nt-form-title');
-  var cnc = document.getElementById('nt-cancel-btn');
-  if (sym) sym.value = t.symbol;
-  if (dir) dir.value = t.direction;
-  if (lev) lev.value = String(t.leverage);
-  if (ent) ent.value = t.entryPrice;
-  if (ext) ext.value = t.exitPrice;
-  if (sig) sig.value = t.signalType;
-  if (not) not.value = t.notes || '';
-  if (rus) rus.value = t.realizedUSDT != null ? t.realizedUSDT : '';
-  if (osz) osz.value = t.originalSizeUSDT != null ? t.originalSizeUSDT : '';
-  if (btn) { btn.textContent = '✎ Save Edit'; btn.style.borderColor = 'var(--amber)'; btn.style.color = 'var(--amber)'; btn.style.background = 'rgba(245,166,35,0.1)'; }
-  if (hdr) hdr.textContent = 'Edit Trade';
-  if (cnc) cnc.style.display = 'block';
-  var form = document.getElementById('new-trade-form');
-  if (form) form.scrollIntoView({ behavior:'smooth' });
-}
-
-function cancelEditTrade() {
-  window._editingTradeId = null;
-  showTradeLog();
-}
-
 function calcTradePnl(entry, exit, direction, leverage) {
   if (!entry || !exit || entry <= 0) return 0;
   var raw = direction === 'long' ? (exit - entry) / entry : (entry - exit) / entry;
@@ -137,42 +93,27 @@ function seedInitialTrades() {
 }
 
 function getTradeStats(trades) {
-  if (!trades || trades.length === 0) return { winRate:0, totalPnl:0, avgPnl:0, totalUSDT:null, best:null, worst:null, byType:{} };
-  // Only count closed trades for stats — open trades have no outcome yet
-  trades = trades.filter(function(t) { return t.status !== 'open'; });
-  if (trades.length === 0) return { winRate:0, totalPnl:0, avgPnl:0, totalUSDT:null, best:null, worst:null, byType:{} };
-  var isWin = function(t) { return t.realizedUSDT != null ? t.realizedUSDT > 0 : (t.pnlPercent || 0) > 0; };
-  var wins   = trades.filter(isWin);
-  var losses = trades.filter(function(t) { return !isWin(t); });
+  if (!trades || trades.length === 0) return { winRate:0, totalPnl:0, avgPnl:0, best:null, worst:null, byType:{} };
+  var wins   = trades.filter(function(t) { return t.pnlPercent > 0; });
+  var losses = trades.filter(function(t) { return t.pnlPercent <= 0; });
   var totalPnl = trades.reduce(function(s, t) { return s + (t.pnlPercent || 0); }, 0);
-  var usdtTrades = trades.filter(function(t) { return t.realizedUSDT != null; });
-  var totalUSDT = usdtTrades.length > 0 ? +usdtTrades.reduce(function(s,t) { return s + t.realizedUSDT; }, 0).toFixed(2) : null;
-  var sorted = trades.slice().sort(function(a,b) {
-    return (b.realizedUSDT != null ? b.realizedUSDT : b.pnlPercent) - (a.realizedUSDT != null ? a.realizedUSDT : a.pnlPercent);
-  });
+  var sorted = trades.slice().sort(function(a,b) { return b.pnlPercent - a.pnlPercent; });
   var byType = {};
   trades.forEach(function(t) {
     if (!byType[t.signalType]) byType[t.signalType] = { w:0, l:0 };
-    if (isWin(t)) byType[t.signalType].w++;
+    if (t.pnlPercent > 0) byType[t.signalType].w++;
     else byType[t.signalType].l++;
   });
   return {
-    winRate:   +(wins.length / trades.length * 100).toFixed(1),
-    totalPnl:  +totalPnl.toFixed(2),
-    avgPnl:    +(totalPnl / trades.length).toFixed(2),
-    totalUSDT: totalUSDT,
-    best:      sorted[0] || null,
-    worst:     sorted[sorted.length - 1] || null,
-    wins:      wins.length,
-    losses:    losses.length,
-    byType:    byType
+    winRate:  +(wins.length / trades.length * 100).toFixed(1),
+    totalPnl: +totalPnl.toFixed(2),
+    avgPnl:   +(totalPnl / trades.length).toFixed(2),
+    best:     sorted[0] || null,
+    worst:    sorted[sorted.length - 1] || null,
+    wins:     wins.length,
+    losses:   losses.length,
+    byType:   byType
   };
-}
-// Learning system removed — applyLearningWeight is a no-op pass-through
-function applyLearningWeight(rawScore) { return +Number(rawScore).toFixed(1); }
-function renderSessionPnl() {
-  var el = document.getElementById('session-pnl-panel');
-  if (el) el.style.display = 'none';
 }
 
 function showTradeLog() {
@@ -204,19 +145,19 @@ function showTradeLog() {
   var sigLabels = { swing:'Swing', scalp:'Scalp', post_sweep:'Post-Sweep', liq_scale:'Scale-In', sweep_opp:'Sweep Opp', manual:'Manual' };
   var sigColors = { swing:'var(--blue)', scalp:'var(--amber)', post_sweep:'var(--purple)', liq_scale:'var(--amber)', sweep_opp:'var(--green)', manual:'var(--text2)' };
 
-  var sigBadge = function(type) {
+  function sigBadge(type) {
     var lbl = sigLabels[type] || type;
     var col = sigColors[type] || 'var(--text2)';
     return '<span style="font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(255,255,255,0.06);color:' + col + ';font-family:var(--mono);white-space:nowrap">' + lbl + '</span>';
   }
 
-  var dirBadge = function(dir) {
+  function dirBadge(dir) {
     return dir === 'long'
       ? '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,208,132,0.12);color:var(--green);font-family:var(--mono)">▲ L</span>'
       : '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(255,77,77,0.12);color:var(--red);font-family:var(--mono)">▼ S</span>';
   }
 
-  var relTime = function(ts) {
+  function relTime(ts) {
     var d = Date.now() - ts;
     if (d < 3600000)  return Math.round(d/60000)  + 'm ago';
     if (d < 86400000) return Math.round(d/3600000) + 'h ago';
@@ -236,69 +177,27 @@ function showTradeLog() {
       + '</div>';
   }).join('');
 
-  // Open trades — live floating PnL banner above table
-  var openTrades = tradeLog.filter(function(t) { return t.status === 'open'; });
-  var openHtml = '';
-  if (openTrades.length > 0) {
-    openHtml = '<div style="margin-bottom:16px">'
-      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--amber);font-family:var(--mono);margin-bottom:8px">⚡ Open Positions (' + openTrades.length + ')</div>';
-    openTrades.forEach(function(t) {
-      var livePrice = (mktData[t.symbol] || {}).price || 0;
-      var dec = COINS[t.symbol] ? COINS[t.symbol].dec : 2;
-      var floatPct = livePrice > 0 ? calcTradePnl(t.entryPrice, livePrice, t.direction, t.leverage) : null;
-      var floatUSDT = (floatPct !== null && t.originalSizeUSDT) ? +(floatPct / 100 * t.originalSizeUSDT).toFixed(2) : null;
-      var fCol = floatPct === null ? 'var(--text3)' : floatPct >= 0 ? 'var(--green)' : 'var(--red)';
-      var fSign = floatPct !== null && floatPct >= 0 ? '+' : '';
-      var pctStr = floatPct !== null ? fSign + floatPct.toFixed(2) + '%' : 'loading...';
-      var usdtStr = floatUSDT !== null ? ' / ' + (floatUSDT >= 0 ? '+' : '') + floatUSDT.toFixed(2) + 'U' : ' (add size for USDT)';
-      openHtml += '<div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.3);border-radius:8px;padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'
-        + '<div style="display:flex;align-items:center;gap:10px">'
-        + '<span style="font-size:11px;font-weight:700;font-family:var(--mono)">' + t.symbol + '</span>'
-        + dirBadge(t.direction)
-        + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">' + t.leverage + 'x</span>'
-        + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">in @ ' + fn(t.entryPrice, dec) + '</span>'
-        + (livePrice > 0 ? '<span style="font-size:10px;color:var(--text2);font-family:var(--mono)">now ' + fn(livePrice, dec) + '</span>' : '')
-        + '</div>'
-        + '<div style="display:flex;align-items:center;gap:10px">'
-        + '<span style="font-size:15px;font-weight:700;font-family:var(--mono);color:' + fCol + '">' + pctStr + '<span style="font-size:11px;font-weight:400">' + usdtStr + '</span></span>'
-        + '<button onclick="closeTrade(\'' + t.id + '\')" style="font-size:10px;background:rgba(0,208,132,0.12);border:1px solid var(--green-b);color:var(--green);border-radius:4px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-weight:600">✓ Close</button>'
-        + '<button onclick="startEditTrade(\'' + t.id + '\')" style="font-size:10px;background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:4px 8px;cursor:pointer;font-family:var(--mono)">✎</button>'
-        + '<button onclick="deleteTrade(\'' + t.id + '\')" style="font-size:10px;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:4px 8px;cursor:pointer;font-family:var(--mono)">✕</button>'
-        + '</div>'
-        + '</div>';
-    });
-    openHtml += '</div>';
-  }
-
-  // Trade rows (closed only)
-  filtered = filtered.filter(function(t) { return t.status !== 'open'; });
+  // Trade rows
   var rows = filtered.length === 0
-    ? '<tr><td colspan="8" style="text-align:center;color:var(--text3);font-family:var(--mono);font-size:12px;padding:20px">No trades logged yet</td></tr>'
+    ? '<tr><td colspan="7" style="text-align:center;color:var(--text3);font-family:var(--mono);font-size:12px;padding:20px">No trades logged yet</td></tr>'
     : filtered.map(function(t) {
         var pCol = t.pnlPercent > 0 ? 'var(--green)' : 'var(--red)';
         var pSign = t.pnlPercent > 0 ? '+' : '';
         var dec = COINS[t.symbol] ? COINS[t.symbol].dec : 2;
-        var usdtCell = t.realizedUSDT != null
-          ? '<span style="font-size:11px;font-family:var(--mono);color:' + (t.realizedUSDT >= 0 ? 'var(--green)' : 'var(--red)') + ';font-weight:600">' + (t.realizedUSDT >= 0 ? '+' : '') + t.realizedUSDT.toFixed(2) + 'U</span>'
-          : '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">—</span>';
         return '<tr style="border-bottom:1px solid var(--border)">'
           + '<td style="font-size:11px;color:var(--text3);font-family:var(--mono);padding:8px 6px;white-space:nowrap">' + relTime(t.timestamp) + '</td>'
           + '<td style="padding:8px 6px"><span style="font-size:11px;font-weight:600;margin-right:5px">' + t.symbol + '</span>' + dirBadge(t.direction) + '</td>'
           + '<td style="font-size:11px;font-family:var(--mono);color:var(--text2);padding:8px 6px">' + fn(t.entryPrice,dec) + '<br><span style="color:var(--text3)">' + fn(t.exitPrice,dec) + '</span></td>'
           + '<td style="font-family:var(--mono);font-size:13px;font-weight:700;color:' + pCol + ';padding:8px 6px">' + pSign + t.pnlPercent + '%</td>'
-          + '<td style="padding:8px 6px">' + usdtCell + '</td>'
           + '<td style="font-size:11px;font-family:var(--mono);color:var(--text2);padding:8px 6px">' + t.leverage + 'x</td>'
           + '<td style="padding:8px 6px">' + sigBadge(t.signalType) + '</td>'
-          + '<td style="padding:8px 6px;white-space:nowrap">'
-          + '<button onclick="startEditTrade(\'' + t.id + '\')" style="font-size:9px;background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:3px;padding:2px 6px;cursor:pointer;font-family:var(--mono);margin-right:3px">✎</button>'
-          + '<button onclick="deleteTrade(\'' + t.id + '\')" style="font-size:9px;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 6px;cursor:pointer;font-family:var(--mono)">✕</button>'
-          + '</td>'
+          + '<td style="padding:8px 6px"><button onclick="deleteTrade(\'' + t.id + '\')" style="font-size:9px;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 6px;cursor:pointer;font-family:var(--mono)">✕</button></td>'
           + '</tr>';
       }).join('');
 
   // New trade form
   var formHtml = '<div id="new-trade-form" style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:16px;margin-top:16px">'
-    + '<div id="nt-form-title" style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text2);font-family:var(--mono);margin-bottom:12px">Log New Trade</div>'
+    + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text2);font-family:var(--mono);margin-bottom:12px">Log New Trade</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">'
     + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Symbol</div>'
     + '<select id="nt-symbol" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px">'
@@ -315,23 +214,16 @@ function showTradeLog() {
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">'
     + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Entry price</div>'
     + '<input id="nt-entry" type="number" step="any" placeholder="0.00" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
-    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Exit price <span style="font-size:9px;color:var(--text3)">(blank = open trade)</span></div>'
-    + '<input id="nt-exit" type="number" step="any" placeholder="blank = open trade" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
+    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Exit price</div>'
+    + '<input id="nt-exit" type="number" step="any" placeholder="0.00" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
     + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Signal type</div>'
     + '<select id="nt-sig" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px">'
     + '<option value="swing">Swing Lock</option><option value="scalp">Scalp</option><option value="post_sweep">Post-Sweep</option><option value="liq_scale">Liq Scale-In</option><option value="sweep_opp">Sweep Opp</option><option value="manual">Manual</option>'
     + '</select></div></div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
-    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Realized USDT <span style="font-size:9px">(from BloFin)</span></div>'
-    + '<input id="nt-realizedUSDT" type="number" step="any" placeholder="e.g. 4.23 or -1.85" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
-    + '<div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Position size USDT <span style="font-size:9px">(optional)</span></div>'
-    + '<input id="nt-originalSize" type="number" step="any" placeholder="e.g. 50.00" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
-    + '</div>'
     + '<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Notes (optional)</div>'
     + '<input id="nt-notes" type="text" placeholder="e.g. W pattern, stopped out before TP1..." style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:12px;padding:6px;box-sizing:border-box"></div>'
     + '<div style="display:flex;align-items:center;gap:8px">'
-    + '<button id="nt-submit-btn" onclick="submitNewTrade()" style="flex:1;padding:9px;border-radius:6px;border:1px solid var(--green-b);background:rgba(0,208,132,0.1);color:var(--green);font-family:var(--mono);font-size:12px;cursor:pointer;font-weight:500">+ Log Trade</button>'
-    + '<button id="nt-cancel-btn" onclick="cancelEditTrade()" style="display:none;padding:9px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text2);font-family:var(--mono);font-size:12px;cursor:pointer">Cancel</button>'
+    + '<button onclick="submitNewTrade()" style="flex:1;padding:9px;border-radius:6px;border:1px solid var(--green-b);background:rgba(0,208,132,0.1);color:var(--green);font-family:var(--mono);font-size:12px;cursor:pointer;font-weight:500">+ Log Trade</button>'
     + '<div id="nt-pnl-preview" style="font-size:12px;font-family:var(--mono);color:var(--text3);min-width:80px;text-align:right"></div>'
     + '</div></div>';
 
@@ -389,15 +281,13 @@ function showTradeLog() {
     + '</div></div>'
 
     // Table
-    + openHtml
     + '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">'
     + '<table style="width:100%;border-collapse:collapse">'
     + '<thead><tr style="background:var(--bg3)">'
     + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">Time</th>'
     + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">Coin</th>'
     + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">Entry/Exit</th>'
-    + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">PnL%</th>'
-    + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">USDT</th>'
+    + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">PnL</th>'
     + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">Lev</th>'
     + '<th style="text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);padding:10px 6px;font-weight:500">Signal</th>'
     + '<th style="padding:10px 6px"></th>'
@@ -463,94 +353,33 @@ function buildLevBreakdown(trades) {
 }
 
 function updatePnlPreview() {
-  var entry  = parseFloat(document.getElementById('nt-entry') && document.getElementById('nt-entry').value);
-  var exit   = parseFloat(document.getElementById('nt-exit')  && document.getElementById('nt-exit').value);
-  var dir    = document.getElementById('nt-dir')  ? document.getElementById('nt-dir').value  : 'long';
-  var lev    = parseInt(document.getElementById('nt-lev')  ? document.getElementById('nt-lev').value  : '50');
-  var rusRaw = document.getElementById('nt-realizedUSDT') ? document.getElementById('nt-realizedUSDT').value : '';
-  var oszRaw = document.getElementById('nt-originalSize')  ? document.getElementById('nt-originalSize').value  : '';
-  var el = document.getElementById('nt-pnl-preview');
+  var entry = parseFloat(document.getElementById('nt-entry') && document.getElementById('nt-entry').value);
+  var exit  = parseFloat(document.getElementById('nt-exit')  && document.getElementById('nt-exit').value);
+  var dir   = document.getElementById('nt-dir')  ? document.getElementById('nt-dir').value  : 'long';
+  var lev   = parseInt(document.getElementById('nt-lev')  ? document.getElementById('nt-lev').value  : '50');
+  var el    = document.getElementById('nt-pnl-preview');
   if (!el) return;
-  var rus = rusRaw !== '' ? parseFloat(rusRaw) : null;
-  var osz = oszRaw !== '' ? parseFloat(oszRaw) : null;
-  // Priority: BloFin data > calculated estimate
-  if (rus != null && osz != null && osz > 0) {
-    var pnlB = +(rus / osz * 100).toFixed(2);
-    el.textContent = (pnlB >= 0 ? '+' : '') + pnlB + '% (BloFin)';
-    el.style.color = pnlB >= 0 ? 'var(--green)' : 'var(--red)';
-    return;
-  }
   if (!entry || !exit || isNaN(entry) || isNaN(exit)) { el.textContent = ''; return; }
   var pnl = calcTradePnl(entry, exit, dir, lev);
-  el.textContent = (pnl >= 0 ? '+' : '') + pnl + '% (est.)';
+  el.textContent = (pnl >= 0 ? '+' : '') + pnl + '%';
   el.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
 }
 
 function submitNewTrade() {
-  var sym    = document.getElementById('nt-symbol') ? document.getElementById('nt-symbol').value : activeCoin;
-  var dir    = document.getElementById('nt-dir')    ? document.getElementById('nt-dir').value    : 'long';
-  var lev    = parseInt(document.getElementById('nt-lev') ? document.getElementById('nt-lev').value : '50');
-  var entry  = parseFloat(document.getElementById('nt-entry') ? document.getElementById('nt-entry').value : '');
-  var exitRaw = document.getElementById('nt-exit') ? document.getElementById('nt-exit').value.trim() : '';
-  var exit   = exitRaw !== '' ? parseFloat(exitRaw) : null;
-  var sig    = document.getElementById('nt-sig')   ? document.getElementById('nt-sig').value   : 'manual';
-  var notes  = document.getElementById('nt-notes') ? document.getElementById('nt-notes').value : '';
-  var rusRaw = document.getElementById('nt-realizedUSDT') ? document.getElementById('nt-realizedUSDT').value : '';
-  var oszRaw = document.getElementById('nt-originalSize')  ? document.getElementById('nt-originalSize').value  : '';
-  if (!entry || isNaN(entry)) { alert('Enter entry price'); return; }
-  var isOpen = (exit === null || isNaN(exit));
-  var realizedUSDT     = rusRaw !== '' && !isNaN(parseFloat(rusRaw)) ? +parseFloat(rusRaw).toFixed(4) : null;
-  var originalSizeUSDT = oszRaw !== '' && !isNaN(parseFloat(oszRaw)) ? +parseFloat(oszRaw).toFixed(2) : null;
-  // Use BloFin realized data as source of truth when available — more accurate than our fee model
-  var pnl;
-  if (isOpen) {
-    pnl = null;
-  } else if (realizedUSDT != null && originalSizeUSDT != null && originalSizeUSDT > 0) {
-    pnl = +(realizedUSDT / originalSizeUSDT * 100).toFixed(2); // exact BloFin %
-  } else {
-    pnl = calcTradePnl(entry, exit, dir, lev); // fallback estimate
+  var sym   = document.getElementById('nt-symbol') ? document.getElementById('nt-symbol').value : activeCoin;
+  var dir   = document.getElementById('nt-dir')    ? document.getElementById('nt-dir').value    : 'long';
+  var lev   = parseInt(document.getElementById('nt-lev') ? document.getElementById('nt-lev').value : '50');
+  var entry = parseFloat(document.getElementById('nt-entry') ? document.getElementById('nt-entry').value : '');
+  var exit  = parseFloat(document.getElementById('nt-exit')  ? document.getElementById('nt-exit').value  : '');
+  var sig   = document.getElementById('nt-sig')   ? document.getElementById('nt-sig').value   : 'manual';
+  var notes = document.getElementById('nt-notes') ? document.getElementById('nt-notes').value : '';
+  if (!entry || !exit || isNaN(entry) || isNaN(exit)) {
+    alert('Enter both entry and exit price');
+    return;
   }
-  var tradeData = { symbol:sym, direction:dir, entryPrice:entry, exitPrice:exit, pnlPercent:pnl, leverage:lev, signalType:sig, notes:notes, realizedUSDT:realizedUSDT, originalSizeUSDT:originalSizeUSDT, status: isOpen ? 'open' : 'closed' };
-  if (window._editingTradeId) {
-    updateTrade(window._editingTradeId, tradeData);
-    window._editingTradeId = null;
-  } else {
-    addTrade(tradeData);
-  }
+  var pnl = calcTradePnl(entry, exit, dir, lev);
+  addTrade({ symbol:sym, direction:dir, entryPrice:entry, exitPrice:exit, pnlPercent:pnl, leverage:lev, signalType:sig, notes:notes });
   showTradeLog();
-}
-
-function closeTrade(id) {
-  var t = tradeLog.find(function(x) { return x.id === id; });
-  if (!t) return;
-  window._editingTradeId = id;
-  window._closingTrade = true;
-  var sym = document.getElementById('nt-symbol');
-  var dir = document.getElementById('nt-dir');
-  var lev = document.getElementById('nt-lev');
-  var ent = document.getElementById('nt-entry');
-  var ext = document.getElementById('nt-exit');
-  var sig = document.getElementById('nt-sig');
-  var not = document.getElementById('nt-notes');
-  var rus = document.getElementById('nt-realizedUSDT');
-  var osz = document.getElementById('nt-originalSize');
-  var btn = document.getElementById('nt-submit-btn');
-  var hdr = document.getElementById('nt-form-title');
-  var cnc = document.getElementById('nt-cancel-btn');
-  if (sym) sym.value = t.symbol;
-  if (dir) dir.value = t.direction;
-  if (lev) lev.value = String(t.leverage);
-  if (ent) ent.value = t.entryPrice;
-  if (ext) { ext.value = ''; ext.focus(); ext.style.borderColor = 'var(--green)'; }
-  if (sig) sig.value = t.signalType;
-  if (not) not.value = t.notes || '';
-  if (rus) { rus.value = ''; rus.style.borderColor = 'var(--amber)'; }
-  if (osz) osz.value = t.originalSizeUSDT != null ? t.originalSizeUSDT : '';
-  if (btn) { btn.textContent = '✓ Close Trade'; btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)'; btn.style.background = 'rgba(0,208,132,0.15)'; }
-  if (hdr) hdr.textContent = 'Close Trade — ' + t.symbol + ' ' + t.direction.toUpperCase();
-  if (cnc) cnc.style.display = 'block';
-  var form = document.getElementById('new-trade-form');
-  if (form) form.scrollIntoView({ behavior:'smooth' });
 }
 
 function exportTradeLog() {
@@ -570,7 +399,6 @@ function clearTradeLog() {
 }
 
 function exitTradeLog() {
-  renderSessionPnl();
   tradeLogView = false;
   var tlBtn = document.getElementById('trade-log-btn');
   if (tlBtn) { tlBtn.style.background = ''; tlBtn.style.color = ''; tlBtn.style.borderColor = ''; }
@@ -590,20 +418,12 @@ function loadSwingSignals(){
     const raw=localStorage.getItem('swingSignals_v1');
     if(!raw) return;
     const parsed=JSON.parse(raw);
+    // Validate each signal has required fields before loading
     Object.entries(parsed).forEach(([k,sig])=>{
-      if(!sig || !sig.lockedSetup || !sig.lockedAt || !sig.symbol || !sig.tf) return;
-      if(typeof sig.lockedSetup.entry !== 'number' || sig.lockedSetup.entry <= 0) return;
-      // Drop signals older than 5 days
-      if(Date.now() - sig.lockedAt > 5*86400000){
-        console.log('Dropping stale signal:', k);
-        return;
+      if(sig && sig.lockedSetup && sig.lockedAt && sig.symbol && sig.tf &&
+         typeof sig.lockedSetup.entry==='number' && sig.lockedSetup.entry>0){
+        swingSignals[k]=sig;
       }
-      // Migrate: add direction if missing
-      if(!sig.lockedSetup.direction){
-        sig.lockedSetup.direction = sig.lockedSetup.bias === 'short' ? 'short' : 'long';
-      }
-      if(!sig.dynamic.lowScoreCandles) sig.dynamic.lowScoreCandles = 0;
-      swingSignals[k]=sig;
     });
     console.log('Loaded swing signals:', Object.keys(swingSignals));
   } catch(e){ console.warn('Could not load swing signals:', e); swingSignals={}; }
@@ -616,36 +436,29 @@ function saveSwingSignals(){
 
 function lockSignal(coin, tf, ta, setup, sc, price, pivots, liqZones){
   const key = coin+'_'+tf;
-  // Don't re-lock if a valid active signal already exists
-  if(swingSignals[key] && swingSignals[key].dynamic && swingSignals[key].dynamic.status === 'active') return;
-
   const candleTime = getCurrentCandleTime(tf);
-  // Lock direction from trend at lock time — don't wait for AI
-  const isBull = ta.trend === 'bullish' || ta.trend === 'mild-bullish';
-  const direction = isBull ? 'long' : 'short';
-
   swingSignals[key] = {
     key, symbol:coin, tf, mode:'swing',
     lockedAt: Date.now(),
     lockedCandleTime: candleTime,
 
     lockedSetup: {
-      direction:  direction,
-      bias:       direction,
+      bias: null,                        // filled in when AI resolves
       support:    ta.support,
       resistance: ta.resistance,
       entry:      setup.lE,
-      stopLoss:   setup.lSL,       // frozen SL = invalidation level for longs
+      stopLoss:   setup.lSL,
       takeProfits:[setup.lTP1, setup.lTP2],
       shortEntry: setup.sE,
-      shortStop:  setup.sSL,       // frozen SL = invalidation level for shorts
+      shortStop:  setup.sSL,
       shortTPs:   [setup.sTP1, setup.sTP2],
       liqLong:    setup.liqLong,
       liqShort:   setup.liqShort,
       atr:        ta.atr,
-      invalidationLevel: setup.lSL // kept for compat — now uses stopLoss
+      invalidationLevel: ta.support      // price candle-close below this kills signal
     },
 
+    // Pivot levels frozen at lock time (so invalidation threshold never drifts)
     lockedPivots: pivots ? { highs:[...pivots.highs], lows:[...pivots.lows] } : { highs:[], lows:[] },
 
     snapshot: {
@@ -653,20 +466,22 @@ function lockSignal(coin, tf, ta, setup, sc, price, pivots, liqZones){
       rsi:           ta.rsi,
       trend:         ta.trend,
       lockedPrice:   price,
-      oiAtLock:      (mktData[coin]||{}).oiNotional || 0,
-      fundingAtLock: (mktData[coin]||{}).funding || 0,
-      aiSummary:     null,
+      oiAtLock:      (typeof mktData[coin]!=='undefined') ? mktData[coin].oiNotional : 0,
+      fundingAtLock: (typeof mktData[coin]!=='undefined') ? mktData[coin].funding : 0,
+      aiSummary:     null,           // filled post-AI
+      aiInterestZone:null,
       aiConviction:  null,
       aiBias:        null
     },
 
     dynamic: {
-      status:            'active',
-      candlesElapsed:    0,
+      status:        'active',       // active | triggered | tp1Hit | expired | invalidated
+      candlesElapsed:0,
       lastCheckedCandle: candleTime,
-      lowScoreCandles:   0
+      consecutiveLowScore: 0
     },
 
+    // Phase 2: smart re-eval stubs (wired up by Grok in Phase 2)
     reEval: {
       lastChecked:          Date.now(),
       structureBreaks:      0,
@@ -676,7 +491,7 @@ function lockSignal(coin, tf, ta, setup, sc, price, pivots, liqZones){
     }
   };
   saveSwingSignals();
-  console.log('Signal locked: '+key+' @ $'+price+', score '+sc+', dir: '+direction);
+  console.log(`Signal locked: ${key} @ $${price}, score ${sc}`);
 }
 
 function updateSignalAI(coin, tf, ai){
@@ -854,53 +669,48 @@ function checkSignalValidity(coin, tf, currentPrice, currentScore){
   if(sig.mode !== 'swing') return null;
 
   const candleTime = getCurrentCandleTime(tf);
-  const isNewCandle = candleTime > sig.dynamic.lastCheckedCandle;
 
-  // Update candle count only on new candle (not every refresh)
-  if(isNewCandle){
+  // Count candles elapsed
+  if(candleTime > sig.dynamic.lastCheckedCandle){
     const tfMs = getTfMs(tf);
     const elapsed = Math.round((candleTime - sig.lockedCandleTime) / tfMs);
     sig.dynamic.candlesElapsed = elapsed;
     sig.dynamic.lastCheckedCandle = candleTime;
-    // Low score: track by candle, not refresh
-    if(currentScore < 5) sig.dynamic.lowScoreCandles = (sig.dynamic.lowScoreCandles||0) + 1;
-    else sig.dynamic.lowScoreCandles = 0;
     saveSwingSignals();
   }
 
-  const ls = sig.lockedSetup;
-  const direction = ls.direction || (ls.bias === 'short' ? 'short' : 'long');
-
-  // RULE 1: Expired after 5 candles
+  // INVALIDATION RULES
+  // 1. Expired (too many candles — 5 daily = 5 days, 5 weekly = 5 weeks)
   if(sig.dynamic.candlesElapsed >= 5){
     invalidateSignal(coin, tf, 'expired after 5 candles');
     return null;
   }
 
-  // RULE 2: Price hit frozen stop loss
-  if(direction === 'long' && ls.stopLoss && currentPrice < ls.stopLoss){
-    invalidateSignal(coin, tf, 'price hit long SL '+ls.stopLoss);
-    return null;
-  }
-  if(direction === 'short' && ls.shortStop && currentPrice > ls.shortStop){
-    invalidateSignal(coin, tf, 'price hit short SL '+ls.shortStop);
+  // 2. Price closed a candle below invalidation level (for longs) or above (for shorts)
+  const inv = sig.lockedSetup.invalidationLevel;
+  if(sig.lockedSetup.bias !== 'short' && currentPrice < inv * 0.998){
+    invalidateSignal(coin, tf, `price ${currentPrice} broke invalidation ${inv}`);
     return null;
   }
 
-  // RULE 3: Score weak for 3 consecutive candles
-  if((sig.dynamic.lowScoreCandles||0) >= 3){
-    invalidateSignal(coin, tf, 'score below 5 for 3 candles');
-    return null;
-  }
-
-  // Update status flags
-  if(direction === 'long'){
-    if(currentPrice <= ls.entry * 1.003 && currentPrice >= ls.entry * 0.997) sig.dynamic.status = 'triggered';
-    if(ls.takeProfits && currentPrice >= ls.takeProfits[0]) sig.dynamic.status = 'tp1Hit';
+  // 3. Score dropped below 4 for 2 consecutive refreshes
+  if(currentScore < 4){
+    sig.dynamic.consecutiveLowScore = (sig.dynamic.consecutiveLowScore||0) + 1;
+    if(sig.dynamic.consecutiveLowScore >= 2){
+      invalidateSignal(coin, tf, 'score below 4 for 2 refreshes');
+      return null;
+    }
+    saveSwingSignals();
   } else {
-    if(currentPrice >= ls.shortEntry * 0.997 && currentPrice <= ls.shortEntry * 1.003) sig.dynamic.status = 'triggered';
-    if(ls.shortTPs && currentPrice <= ls.shortTPs[0]) sig.dynamic.status = 'tp1Hit';
+    sig.dynamic.consecutiveLowScore = 0;
   }
+
+  // Signal is valid — update status flags
+  const ls = sig.lockedSetup;
+  if(currentPrice <= ls.entry * 1.002 && currentPrice >= ls.entry * 0.998)
+    sig.dynamic.status = 'triggered';
+  if(currentPrice >= ls.takeProfits[0])
+    sig.dynamic.status = 'tp1Hit';
 
   return sig;
 }
@@ -1036,7 +846,7 @@ function findPivotLevels(klines, strength=3) {
 function calcTA(klines){
   if(!klines||klines.length<14)return{rsi:50,ema20:0,ema50:null,atr:0,trend:'neutral',support:0,resistance:0,volProfile:[],poc:0};
   const cl=klines.map(k=>k.c),hi=klines.map(k=>k.h),lo=klines.map(k=>k.l);
-  var ema = function(arr,p){var k=2/(p+1);var e=arr.slice(0,p).reduce(function(a,b){return a+b;},0)/p;for(var i=p;i<arr.length;i++)e=arr[i]*k+e*(1-k);return e;};
+  function ema(arr,p){const k=2/(p+1);let e=arr.slice(0,p).reduce((a,b)=>a+b,0)/p;for(let i=p;i<arr.length;i++)e=arr[i]*k+e*(1-k);return e;}
   const ema20=ema(cl,20);
   const ema50=cl.length>=50?ema(cl,50):null;
   let g=0,l=0;
@@ -1279,14 +1089,14 @@ function renderLiqCard(liq, price, dec) {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
         <div style="background:rgba(255,77,77,0.05);border:1px solid var(--red-b);border-radius:8px;padding:12px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--red);font-family:var(--mono);margin-bottom:8px">🔴 Long liquidations (below price)</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--red);font-family:var(--mono);margin-bottom:8px">\uD83D\uDD34 Long liquidations (below price)</div>
           ${longRows}
           <div style="margin-top:8px;padding:6px 8px;background:rgba(255,77,77,.1);border-radius:5px;font-size:11px;color:var(--red);font-family:var(--mono)">
             Major cluster: ${liq.majorLongCluster.priceRange}
           </div>
         </div>
         <div style="background:rgba(0,208,132,0.05);border:1px solid var(--green-b);border-radius:8px;padding:12px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-family:var(--mono);margin-bottom:8px">🟢 Short liquidations (above price)</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-family:var(--mono);margin-bottom:8px">\uD83D\uDFE2 Short liquidations (above price)</div>
           ${shortRows}
           <div style="margin-top:8px;padding:6px 8px;background:rgba(0,208,132,.1);border-radius:5px;font-size:11px;color:var(--green);font-family:var(--mono)">
             Major cluster: ${liq.majorShortCluster.priceRange}
@@ -1294,7 +1104,7 @@ function renderLiqCard(liq, price, dec) {
         </div>
       </div>
       <div style="padding:8px 12px;background:rgba(167,139,250,.05);border:1px solid rgba(167,139,250,.2);border-radius:6px;font-size:11px;color:var(--text2);font-family:var(--mono);line-height:1.6">
-        💡 Price often sweeps nearest cluster before reversing. Long liq at $${fn2(liq.nearestLongSweep.price)} and short liq at $${fn2(liq.nearestShortSweep.price)} are closest high-leverage targets.
+        \uD83D\uDCA1 Price often sweeps nearest cluster before reversing. Long liq at $${fn2(liq.nearestLongSweep.price)} and short liq at $${fn2(liq.nearestShortSweep.price)} are closest high-leverage targets.
       </div>
     </div>`;
   } catch(e) {
@@ -1319,7 +1129,7 @@ function renderLiqScaleInCard(coin, tf, price, ta, klines, cvdData, dec, liqZone
     const d   = mktData[coin] || {};
 
     // ── Build one card for long side, one for short side ─────────────────────
-    var buildCard = function(side, zones) {
+    function buildCard(side, zones) {
       if (!zones || zones.length < 3) return '';
       const isLong = side === 'long';
 
@@ -1526,7 +1336,7 @@ function renderSweepCard(liq, dec) {
       ? `<span style="margin-left:10px;font-size:10px;background:rgba(255,77,77,.2);color:var(--red);padding:2px 8px;border-radius:3px;font-family:var(--mono)">DANGER: ${activeLev}x liquidates before sweep stops</span>`
       : `<span style="margin-left:10px;font-size:10px;background:rgba(0,208,132,.1);color:var(--green);padding:2px 8px;border-radius:3px;font-family:var(--mono)">Stops safe at ${activeLev}x</span>`;
 
-    var dangerBox = function(danger, liq, liqP, stopP, safeStop, isLong) {
+    function dangerBox(danger, liq, liqP, stopP, safeStop, isLong) {
       if (!danger) return `<div style="background:rgba(0,208,132,0.06);border:1px solid var(--green-b);border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:10px;font-family:var(--mono);color:var(--green)">Liq $${fn2(liq)} (${liqP.toFixed(3)}%) — stop triggers first. Safe at ${activeLev}x.</div>`;
       return `<div style="background:rgba(255,77,77,0.12);border:1px solid var(--red-b);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-family:var(--mono);font-size:10px;color:var(--red);line-height:1.6">
         <strong>DANGER at ${activeLev}x:</strong> Liq fires at $${fn2(liq)} (${liqP.toFixed(3)}%) — your stop at ${stopP.toFixed(2)}% away fires AFTER liq. You get liquidated, not stopped out.<br>
@@ -1534,7 +1344,7 @@ function renderSweepCard(liq, dec) {
       </div>`;
     }
 
-    var stopRow = function(danger, originalStop, safeStop, isLong) {
+    function stopRow(danger, originalStop, safeStop, isLong) {
       const displayStop = danger ? safeStop : originalStop;
       const label = danger ? `Safe stop (${activeLev}x)` : 'Stop';
       const struck = danger
@@ -1549,14 +1359,14 @@ function renderSweepCard(liq, dec) {
         </div>${struck}`;
     }
 
-    var liqRow = function(liqPrice, liqDistP) {
+    function liqRow(liqPrice, liqDistP) {
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
         <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">Liq @ ${activeLev}x</span>
         <span style="font-size:11px;color:rgba(255,77,77,0.6);font-family:var(--mono)">$${fn2(liqPrice)} (${liqDistP.toFixed(3)}%)</span>
       </div>`;
     }
 
-    var tpRow = function(label, price) {
+    function tpRow(label, price) {
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
         <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${label}</span>
         <span style="font-size:12px;color:var(--green);font-family:var(--mono)">$${fn2(price)}</span>
@@ -1572,7 +1382,7 @@ function renderSweepCard(liq, dec) {
 
         <!-- Long sweep -->
         <div style="background:rgba(0,208,132,0.05);border:1px solid var(--green-b);border-radius:8px;padding:14px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--green);font-family:var(--mono);margin-bottom:6px">🟢 Long after long liq sweep</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--green);font-family:var(--mono);margin-bottom:6px">\uD83D\uDFE2 Long after long liq sweep</div>
           <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:10px;line-height:1.4">${ls.logic}</div>
           ${dangerBox(lsDanger, lsLiq, lsLiqDistP, lsStopDistP, lsSafe, true)}
           <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
@@ -1594,7 +1404,7 @@ function renderSweepCard(liq, dec) {
 
         <!-- Short squeeze -->
         <div style="background:rgba(255,77,77,0.05);border:1px solid var(--red-b);border-radius:8px;padding:14px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--red);font-family:var(--mono);margin-bottom:6px">🔴 Short after short liq squeeze</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--red);font-family:var(--mono);margin-bottom:6px">\uD83D\uDD34 Short after short liq squeeze</div>
           <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:10px;line-height:1.4">${ss.logic}</div>
           ${dangerBox(ssDanger, ssLiq, ssLiqDistP, ssStopDistP, ssSafe, false)}
           <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
@@ -1894,7 +1704,7 @@ function buildCustomChart(klines, setup, dec, lev) {
   }
 
   // Draw level lines
-  var drawLevel = function(price, color, label, dash) { dash = dash || [];
+  function drawLevel(price, color, label, dash = []) {
     if (!price || price <= 0) return;
     const y = yScale(price);
     if (y < PAD.t - 5 || y > H - PAD.b + 5) return;
@@ -2396,8 +2206,6 @@ function renderMTFCard(mtf, dec) {
 }
 
 function renderSidebar(scores){
-  renderSessionPnl();
-  renderBestSetupBanner();
   const sorted=Object.keys(COINS).map(c=>({c,sc:scores[c]||0})).sort((a,b)=>b.sc-a.sc);
   document.getElementById('coin-list').innerHTML=sorted.map(({c,sc})=>{
     const d=mktData[c]||{};const v=verdictOf(sc);
@@ -2411,318 +2219,11 @@ function renderSidebar(scores){
   }).join('');
 }
 
-function evaluateBestSetups() {
-  var candidates = [];
-  // Guard: skip if market data not loaded yet
-  var hasData = Object.keys(COINS).some(function(c){ return mktData[c] && mktData[c].price > 0; });
-  if (!hasData) return [];
-  Object.keys(COINS).forEach(function(coin) {
-    var kl  = klCache[coin + '_' + activeTF] || [];
-    if (!kl.length) return;
-    var ta  = calcTA(kl);
-    var d   = mktData[coin] || {};
-    if (!d.price) return;
-    var dec = COINS[coin].dec;
-    var rawSc = scoreSignal(coin, ta, null);
-    var isCounterTrend = false;
-    try {
-      var wkl = klCache[coin + '_1w'] || kl;
-      var wta = calcTA(wkl);
-      if (wta.trend === 'bearish' || wta.trend === 'mild-bearish') isCounterTrend = true;
-    } catch(e) {}
-
-    // Post-Sweep
-    try {
-      var liqZ = calcLiqZones(d.price, ta.atr || d.price*0.02, d.oi, d.funding, d.oiNotional, kl, dec);
-      if (liqZ) {
-        var sweep = detectPostSweepConfirmation(kl, liqZ, dec);
-        if (sweep && sweep.confirmed) {
-          var cvdD = (window._lastCvdData && activeCoin === coin) ? window._lastCvdData : {};
-          var str  = calculateSweepStrength(sweep, cvdD, ta, d);
-          var adjSc = applyLearningWeight(rawSc, 'post_sweep');
-          if (isCounterTrend && adjSc >= 7.5) adjSc = 7.4;
-          if (str >= 6) {
-            var obPS = window._lastOB && activeCoin===coin ? window._lastOB : null;
-            var eqsPS = obPS ? calcEntryQualityScore(obPS, liqZ, d.price, ta.atr||d.price*0.02, sweep.side) : null;
-            var adjScPS = Math.min(10, +(adjSc + (eqsPS?eqsPS.boost:0)).toFixed(1));
-            if (isCounterTrend && adjScPS >= 7.5) adjScPS = 7.4;
-            candidates.push({ coin:coin, type:'post_sweep', label:'Post-Sweep', rawSc:rawSc, adjSc:adjScPS, priority:1,
-              isCounterTrend:isCounterTrend,
-              detail:'Strength '+str+'/10 · '+(sweep.side==='long'?'▲ LONG':'▼ SHORT')+(eqsPS?' · EQ '+eqsPS.score+'/10':''),
-              entry:sweep.entryPrice, stop:sweep.stopPrice, tp1:sweep.tp1, direction:sweep.side, eqs:eqsPS });
-          }
-        }
-      }
-    } catch(e) {}
-
-    // Liq Scale-In
-    try {
-      var liqZ2 = calcLiqZones(d.price, ta.atr || d.price*0.02, d.oi, d.funding, d.oiNotional, kl, dec);
-      if (liqZ2) {
-        var checkZone = function(zone, dir) {
-          if (!zone) return;
-          var prox = Math.abs(d.price - zone.price) / d.price;
-          if (prox > 0.02) return;
-          var cvdD2 = (window._lastCvdData && activeCoin === coin) ? window._lastCvdData : {};
-          var cs = 0;
-          if (dir==='long'  && cvdD2.trend==='bullish') cs++;
-          if (dir==='short' && cvdD2.trend==='bearish') cs++;
-          if (dir==='long'  && d.funding < 0)      cs++;
-          if (dir==='short' && d.funding > 0.005)  cs++;
-          if (ta.trend==='bullish' && dir==='long') cs++;
-          if (ta.trend==='bearish' && dir==='short')cs++;
-          if (prox < 0.007) cs++;
-          if (cs >= 3) {
-            var adjSc2 = applyLearningWeight(rawSc, 'liq_scale');
-            if (isCounterTrend && adjSc2 >= 7.5) adjSc2 = 7.4;
-            candidates.push({ coin:coin, type:'liq_scale', label:'Scale-In', rawSc:rawSc, adjSc:adjSc2, priority:2,
-              isCounterTrend:isCounterTrend,
-              detail:cs+'/5 filters · '+(dir==='long'?'▲ LONG':'▼ SHORT')+' near $'+fn(zone.price,dec),
-              direction:dir });
-          }
-        };
-        checkZone(liqZ2.longLiqZones && liqZ2.longLiqZones[0], 'long');
-        checkZone(liqZ2.shortLiqZones && liqZ2.shortLiqZones[0], 'short');
-      }
-    } catch(e) {}
-
-    // Swing
-    var adjScSwing = applyLearningWeight(rawSc, 'swing');
-    var swDir = (ta.trend==='bullish'||ta.trend==='mild-bullish')?'long':'short';
-    if (isCounterTrend && adjScSwing >= 7.5) adjScSwing = 7.4;
-    if (adjScSwing >= 6.0) {
-      var liqZSw=null; try{liqZSw=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,kl,dec);}catch(e){}
-      var obSw = window._lastOB && activeCoin===coin ? window._lastOB : null;
-      var eqsSw = (obSw&&liqZSw) ? calcEntryQualityScore(obSw,liqZSw,d.price,ta.atr||d.price*0.02,swDir) : null;
-      adjScSwing = Math.min(10, +(adjScSwing+(eqsSw?eqsSw.boost:0)).toFixed(1));
-      if (isCounterTrend && adjScSwing >= 7.5) adjScSwing = 7.4;
-      candidates.push({ coin:coin, type:'swing', label:'Swing', rawSc:rawSc, adjSc:adjScSwing, priority:3,
-        isCounterTrend:isCounterTrend,
-        detail:(swDir==='long'?'▲ LONG bias':'▼ SHORT bias')+(eqsSw?' · EQ '+eqsSw.score+'/10':''),
-        direction:swDir, eqs:eqsSw });
-    }
-  });
-
-  candidates.sort(function(a,b){ return a.priority!==b.priority ? a.priority-b.priority : b.adjSc-a.adjSc; });
-  var seen={}, best=[];
-  candidates.forEach(function(c){ if(!seen[c.coin]&&best.length<2){seen[c.coin]=true;best.push(c);} });
-  return best;
-}
-
-function getTier(adjSc, isCounterTrend) {
-  if (adjSc >= 7.5 && !isCounterTrend) return 'take';
-  if (adjSc >= 6.0) return 'watch';
-  return 'skip';
-}
-
-function renderBestSetupBanner() {
-  var el = document.getElementById('best-setup-banner');
-  if (!el) return;
-  var setups = evaluateBestSetups();
-  if (!setups.length) { el.style.display='none'; return; }
-  var cards = setups.map(function(s) {
-    var tier = getTier(s.adjSc, s.isCounterTrend);
-    var bg   = tier==='take' ? 'rgba(0,208,132,0.1)'   : 'rgba(245,166,35,0.1)';
-    var bdr  = tier==='take' ? 'var(--green)'           : 'var(--amber)';
-    var lbl  = tier==='take' ? '🎯 TAKE IT'   : '👀 WATCH';
-    var col  = tier==='take' ? 'var(--green)'           : 'var(--amber)';
-    var scLine = Math.abs(s.adjSc-s.rawSc)>=0.1 ? s.rawSc+' → '+s.adjSc : String(s.adjSc);
-    var ctWarn = s.isCounterTrend ? ' ⚠️ CT' : '';
-    var levels = (s.entry ? ' · In $'+s.entry : '') + (s.stop ? ' · SL $'+s.stop : '') + (s.tp1 ? ' · TP1 $'+s.tp1 : '');
-    var eqsCol = s.eqs && s.eqs.score>=8 ? 'var(--green)' : s.eqs && s.eqs.score>=6 ? 'var(--amber)' : 'var(--text3)';
-    return '<div style="background:'+bg+';border:1px solid '+bdr+';border-radius:8px;padding:10px 14px;margin-bottom:6px">'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
-      + '<span style="font-size:12px;font-weight:700;color:'+col+';font-family:var(--mono)">'+lbl+'</span>'
-      + '<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">'+s.label+ctWarn+'</span>'
-      + '</div>'
-      + '<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:3px">'+s.coin+' · '+s.detail+'</div>'
-      + '<div style="font-size:10px;color:var(--text3);font-family:var(--mono)">Score '+scLine+'/10'+levels+'</div>'
-      + (s.eqs ? '<div style="font-size:10px;font-family:var(--mono);margin-top:3px;color:'+eqsCol+'">Entry Quality '+s.eqs.score+'/10 '+s.eqs.label+' · '+s.eqs.detail+'</div>' : '')
-      + '</div>';
-  }).join('');
-  el.style.display = 'block';
-  el.innerHTML = '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);margin-bottom:8px">🎯 Best Setup Right Now</div>' + cards;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TWO-STAGE PROXIMITY / SWEEP ALERT SYSTEM
-// Runs independently of swing/scalp mode — always watches 1H klines
-// ══════════════════════════════════════════════════════════════════════════════
-
-var _proximityAlertCount = 0;
-var _proximityHourReset  = 0;
-var _proximityRunning    = false;
-
-function getProximityDedupKey(coin, zonePrice, stage) {
-  var candle4H = Math.floor(Date.now() / 14400000) * 14400000;
-  return 'prox_' + stage + '_' + coin + '_' + Math.round(zonePrice) + '_' + candle4H;
-}
-
-function proximityAlertAllowed() {
-  var now = Date.now();
-  if (now - _proximityHourReset > 3600000) { _proximityAlertCount = 0; _proximityHourReset = now; }
-  return _proximityAlertCount < 3;
-}
-
-function markProximityAlertFired(dedupKey) {
-  localStorage.setItem(dedupKey, '1');
-  _proximityAlertCount++;
-}
-
-async function sendProximityAlert(coin, zone, price, atr, stage, klines1H) {
-  try {
-    var dec  = (COINS[coin]||{}).dec || 2;
-    var fmt  = function(n){ return n ? parseFloat(n).toFixed(dec) : '--'; };
-    var isLong = zone.side === 'long';
-    var dist   = Math.abs(price - zone.price);
-    var distPct= (dist / price * 100).toFixed(2);
-
-    if (stage === 1) {
-      var payload1 = {
-        coin: coin, tf: '1h', price: price, score: 0,
-        bias: isLong ? 'long' : 'short', conviction: 'medium',
-        pattern: (isLong ? 'LONG' : 'SHORT') + ' LIQ ZONE APPROACH',
-        patternStage: 'near breakout', patternConfidence: 'high', winRate: '',
-        longEntry:  isLong ? zone.price : price,
-        longStop:   isLong ? +(zone.price * 0.993).toFixed(dec) : price,
-        longTP1:    isLong ? +(zone.price * 1.012).toFixed(dec)  : price,
-        longTP2:    isLong ? +(zone.price * 1.025).toFixed(dec)  : price,
-        shortEntry: isLong ? price : zone.price,
-        shortStop:  isLong ? price : +(zone.price * 1.007).toFixed(dec),
-        shortTP1:   isLong ? price : +(zone.price * 0.988).toFixed(dec),
-        shortTP2:   isLong ? price : +(zone.price * 0.975).toFixed(dec),
-        rsi: '50', trend: 'neutral', funding: '0.0000', fgValue: 50,
-        leverage: 50, liqLong: price, liqShort: price,
-        stopDistPct: '0.7', maxSafeStopPct: '1.2',
-        longMaxSafeLev: 75, shortMaxSafeLev: 75,
-        isProximityAlert: true, proximityStage: 1,
-        suggestedAction: '\u26a0\ufe0f ' + coin + ' approaching ' + zone.leverage + ' liq zone at $' + fmt(zone.price)
-          + ' (' + distPct + '% away). Switch to 1H chart and watch for sweep confirmation.',
-        watchLevel: fmt(zone.price)
-      };
-      await fetch('/api/alert', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload1) });
-      console.log('Stage 1 proximity alert:', coin, zone.leverage, zone.side);
-
-    } else if (stage === 2 && klines1H && klines1H.length >= 3) {
-      var lastK   = klines1H[klines1H.length - 1];
-      var prevK   = klines1H[klines1H.length - 2];
-      var wickLow = Math.min(lastK.l, prevK.l);
-      var wickHgh = Math.max(lastK.h, prevK.h);
-      var stopL   = +(wickLow * 0.997).toFixed(dec);
-      var stopS   = +(wickHgh * 1.003).toFixed(dec);
-      var nowEnt  = price;
-      var confEnt = isLong ? +(zone.price * 1.002).toFixed(dec) : +(zone.price * 0.998).toFixed(dec);
-      var tp1L    = +(nowEnt * 1.012).toFixed(dec);
-      var tp2L    = +(nowEnt * 1.025).toFixed(dec);
-      var tp1S    = +(nowEnt * 0.988).toFixed(dec);
-      var tp2S    = +(nowEnt * 0.975).toFixed(dec);
-      var rrNow   = isLong ? ((tp1L-nowEnt)/(nowEnt-stopL)).toFixed(1) : ((nowEnt-tp1S)/(stopS-nowEnt)).toFixed(1);
-      var rrConf  = isLong ? ((tp1L-confEnt)/(confEnt-stopL)).toFixed(1) : ((confEnt-tp1S)/(stopS-confEnt)).toFixed(1);
-      var payload2 = {
-        coin: coin, tf: '1h', price: price, score: 9,
-        bias: isLong ? 'long' : 'short', conviction: 'high',
-        pattern: (isLong ? 'LONG SWEEP' : 'SHORT SQUEEZE') + ' CONFIRMED \u2014 1H',
-        patternStage: 'confirmed', patternConfidence: 'high', winRate: '',
-        longEntry:  nowEnt,  longStop:  isLong ? stopL : stopS,
-        longTP1:    isLong ? tp1L : tp1S, longTP2: isLong ? tp2L : tp2S,
-        shortEntry: confEnt, shortStop: isLong ? stopL : stopS,
-        shortTP1:   isLong ? tp1L : tp1S, shortTP2: isLong ? tp2L : tp2S,
-        rsi: '50', trend: isLong ? 'bullish' : 'bearish',
-        funding: ((mktData[coin]||{}).funding||0).toFixed(4),
-        fgValue: (mktData[coin]||{}).fgValue||50,
-        leverage: 50, liqLong: stopL, liqShort: stopS,
-        stopDistPct: isLong ? ((nowEnt-stopL)/nowEnt*100).toFixed(3) : ((stopS-nowEnt)/nowEnt*100).toFixed(3),
-        maxSafeStopPct: '1.2', longMaxSafeLev: 75, shortMaxSafeLev: 75,
-        isProximityAlert: true, proximityStage: 2,
-        preBreakoutLong:  isLong,  preBreakoutShort: !isLong,
-        nowEntryLong:  isLong  ? nowEnt : null,
-        nowEntryShort: !isLong ? nowEnt : null,
-        suggestedAction: '🎯 ' + coin + ' ' + (isLong?'LONG':'SHORT')
-          + ' sweep confirmed at $' + fmt(zone.price) + ' (' + zone.leverage + ' zone)'
-          + ' | NOW: $' + fmt(nowEnt) + ' [' + rrNow + 'R]'
-          + ' | CONFIRM: $' + fmt(confEnt) + ' [' + rrConf + 'R]'
-          + ' | SL: $' + fmt(isLong?stopL:stopS)
-          + ' | TP1: $' + fmt(isLong?tp1L:tp1S),
-        watchLevel: fmt(zone.price)
-      };
-      await fetch('/api/alert', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload2) });
-      console.log('Stage 2 sweep alert:', coin, zone.leverage, zone.side);
-    }
-  } catch(e) { console.error('Proximity alert error:', e); }
-}
-
-async function runProximityMonitor() {
-  if (_proximityRunning) return;
-  _proximityRunning = true;
-  try {
-    await Promise.allSettled(Object.keys(COINS).map(async function(coin) {
-      try {
-        var d = mktData[coin];
-        if (!d || !d.price) return;
-        var dec  = COINS[coin].dec;
-        // Use cached 1H klines if available — avoid blocking fetches
-        var kl1H = klCache[coin+'_1h'] || null;
-        if (!kl1H || kl1H.length < 5) {
-          try { kl1H = await Promise.race([
-            fetchKlines(coin, '1h'),
-            new Promise(function(r){ setTimeout(function(){ r(null); }, 2000); })
-          ]); } catch(e) { return; }
-        }
-        if (!kl1H || kl1H.length < 5) return;
-        var ta   = calcTA(kl1H);
-        var atr  = ta.atr || d.price * 0.015;
-        var liqZ = calcLiqZones(d.price, atr, d.oi, d.funding, d.oiNotional, kl1H, dec);
-        if (!liqZ) return;
-
-        var levFilter = ['25x','50x','125x'];
-        var zones = [];
-        liqZ.longLiqZones.forEach(function(z){
-          if(levFilter.indexOf(z.leverage)>-1) zones.push(Object.assign({},z,{side:'long'}));
-        });
-        liqZ.shortLiqZones.forEach(function(z){
-          if(levFilter.indexOf(z.leverage)>-1) zones.push(Object.assign({},z,{side:'short'}));
-        });
-
-        for (var i = 0; i < zones.length; i++) {
-          var zone = zones[i];
-          var dist = Math.abs(d.price - zone.price);
-
-          // Stage 1: within 1.5-2 ATR
-          if (dist <= 2.0*atr && dist >= 0.3*atr) {
-            var s1k = getProximityDedupKey(coin, zone.price, 'S1');
-            if (!localStorage.getItem(s1k) && proximityAlertAllowed()) {
-              markProximityAlertFired(s1k);
-              await sendProximityAlert(coin, zone, d.price, atr, 1, null);
-            }
-          }
-
-          // Stage 2: 1H sweep confirmed
-          var last = kl1H[kl1H.length-1];
-          var prev = kl1H[kl1H.length-2];
-          var swept = zone.side==='long'
-            ? (Math.min(last.l,prev.l)<=zone.price && last.c>zone.price*1.001)
-            : (Math.max(last.h,prev.h)>=zone.price && last.c<zone.price*0.999);
-          if (swept) {
-            var s2k = getProximityDedupKey(coin, zone.price, 'S2');
-            if (!localStorage.getItem(s2k) && proximityAlertAllowed()) {
-              markProximityAlertFired(s2k);
-              await sendProximityAlert(coin, zone, d.price, atr, 2, kl1H);
-            }
-          }
-        }
-      } catch(eInner) { console.warn('Proximity check failed:', coin, eInner.message); }
-    }));
-  } finally { _proximityRunning = false; }
-}
-// ══════════════════════════════════════════════════════════════════════════════
-
-
 function renderAlerts(scores){
   const fired=Object.entries(scores).filter(([,sc])=>sc>=7);
   const el=document.getElementById('alerts-bar');
   if(!fired.length){el.innerHTML='';return;}
-  var _ai=fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('');
-  el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+_ai+'</div>';
+  el.innerHTML=`<div class="alerts-bar"><span class="alert-lbl">High conviction</span>${fired.map(([c,sc])=>`<span class="alert-item">${c} — ${sc}/10 Long setup</span>`).join('')}</div>`;
 }
 
 async function renderDetail(coin,klines,mtfData){
@@ -2733,9 +2234,6 @@ async function renderDetail(coin,klines,mtfData){
   const cvdData = IS_MOBILE ? {trend:'neutral',buyPct:50,sellPct:50,source:'est'} : await fetchCVDData(coin,activeTF);
   const bybitSym = COINS[coin].sym;
   const fundingHist = IS_MOBILE ? [] : await fetchFundingHistory(bybitSym);
-  // OB fetch is fire-and-forget — never blocks page load
-  if (!IS_MOBILE) fetchOrderBook(bybitSym).then(function(ob){ window._lastOB = ob; }).catch(function(){});
-  const obData = window._lastOB || null;
   const fundingMom  = calcFundingMomentum(fundingHist);
   const oiMom       = calcOIMomentum(bybitSym);
   const sc=scoreSignal(coin,ta,mtfData);
@@ -2768,32 +2266,24 @@ async function renderDetail(coin,klines,mtfData){
       const liqDistPct = (imrL-mmrL)*100;
       const lRisk = maxSD*100;
       const sRisk = maxSD*100;
-      var lockedDir = ls.direction || (ls.bias === 'short' ? 'short' : 'long');
       setup={...freshSetup,
-        lE:   lockedDir==='long'  ? ls.entry           : freshSetup.lE,
-        lSL:  lockedDir==='long'  ? lSLlive            : freshSetup.lSL,
-        lRisk,
-        lTP1: lockedDir==='long'  ? ls.takeProfits[0]  : freshSetup.lTP1,
-        lTP2: lockedDir==='long'  ? ls.takeProfits[1]  : freshSetup.lTP2,
-        sE:   lockedDir==='short' ? ls.shortEntry       : (ls.shortEntry||freshSetup.sE),
-        sSL:  lockedDir==='short' ? sSLlive             : freshSetup.sSL,
-        sRisk,
-        sTP1: lockedDir==='short' ? (ls.shortTPs?.[0]||freshSetup.sTP1) : freshSetup.sTP1,
-        sTP2: lockedDir==='short' ? (ls.shortTPs?.[1]||freshSetup.sTP2) : freshSetup.sTP2,
+        lE:ls.entry,
+        lSL:lSLlive, lRisk,
+        lTP1:ls.takeProfits[0], lTP2:ls.takeProfits[1],
+        sE:ls.shortEntry||freshSetup.sE,
+        sSL:sSLlive, sRisk,
+        sTP1:ls.shortTPs?.[0]||freshSetup.sTP1, sTP2:ls.shortTPs?.[1]||freshSetup.sTP2,
         liqLong:liqLongLive, liqShort:liqShortLive,
         liqDistPct,
         levAdjustedLong:true, levAdjustedShort:true,
         atrStopLongPct:freshSetup.atrStopLongPct||0,
         atrStopShortPct:freshSetup.atrStopShortPct||0,
-        maxStopPct:maxSD*100,
-        lockedDirection: lockedDir
+        maxStopPct:maxSD*100
       };
     } else if(sc>=7){
-      const existingKey = coin+'_'+activeTF;
-      if(!swingSignals[existingKey]){
-        lockSignal(coin,activeTF,ta,freshSetup,sc,d.price,pivots,liqZones);
-        lockedSig=swingSignals[existingKey];
-      }
+      // No active signal + score qualifies → lock a new one
+      lockSignal(coin,activeTF,ta,freshSetup,sc,d.price,pivots,liqZones);
+      lockedSig=swingSignals[coin+'_'+activeTF];
     }
   }
   const isLocked=!!lockedSig;
@@ -2855,18 +2345,6 @@ async function renderDetail(coin,klines,mtfData){
   const lNote=entryMode==='optimal'&&entries.pullbackPct>0.05?`<div class="opt-note">Wait for pullback ${entries.pullbackPct.toFixed(2)}% → $${fn(setup.lE,dec)}</div>`:'';
   const sNote=entryMode==='optimal'&&entries.rallyPct>0.05?`<div class="opt-note">Wait for rally ${entries.rallyPct.toFixed(2)}% → $${fn(setup.sE,dec)}</div>`:'';
 
-  var _scoreHtml = '<div class="score-num" style="color:'+scColor+'">' + sc + '<span style="font-size:15px;color:var(--text3)">/10</span></div>'
-    + '<div class="score-lbl">Signal score</div>';
-  var _lockSty='font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono)';
-  var _lockInf='font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px';
-  var _lDir=isLocked&&lockedSig&&lockedSig.lockedSetup?lockedSig.lockedSetup.direction:null;
-  var _lN=isLocked&&lockedSig?(lockedSig.dynamic.candlesElapsed||0):0;
-  var _lSL=isLocked&&lockedSig&&lockedSig.lockedSetup?(lockedSig.lockedSetup.stopLoss||'-'):'-';
-  var _lSSL=isLocked&&lockedSig&&lockedSig.lockedSetup?(lockedSig.lockedSetup.shortStop||'-'):'-';
-  var _lBase=isLocked?'<span style="'+_lockSty+'">LOCKED</span>':'';
-  var _longBadge=isLocked&&lockedSig?'<span style="'+_lockSty+'">LOCKED '+(_lDir==='long'?'▲ LONG':'▼ SHORT (other side)')+'</span><span style="'+_lockInf+'">'+_lN+'/5 candles · SL $'+_lSL+'</span>':_lBase;
-  var _shortBadge=isLocked&&lockedSig?'<span style="'+_lockSty+'">LOCKED '+(_lDir==='short'?'▼ SHORT':'▲ LONG (other side)')+'</span><span style="'+_lockInf+'">'+_lN+'/5 candles · SL $'+_lSSL+'</span>':_lBase;
-  var _dismissBtn=isLocked?'<button onclick="invalidateSignal(\''+coin+'\',\''+activeTF+'\',\'dismissed\');selectCoin(\''+coin+'\')" style="font-size:9px;background:rgba(255,77,77,0.1);color:var(--red);border:1px solid var(--red-b);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">✕ Dismiss</button>':'';
   document.getElementById('main-content').innerHTML=`
     <div class="mhdr">
       <div>
@@ -2879,7 +2357,8 @@ async function renderDetail(coin,klines,mtfData){
         </div>
       </div>
       <div class="score-box">
-        ${_scoreHtml}
+        <div class="score-num" style="color:${scColor}">${sc}<span style="font-size:15px;color:var(--text3)">/10</span></div>
+        <div class="score-lbl">Signal score</div>
       </div>
     </div>
 
@@ -2961,9 +2440,10 @@ async function renderDetail(coin,klines,mtfData){
       <!-- Long setup -->
       <div class="card" style="border-left:3px solid var(--green)${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         <div class="card-title" style="color:var(--green);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-          <span>Long setup ${_longBadge}
+          <span>Long setup ${isLocked?`<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>`:''}
+          ${isLocked&&lockedSig?`<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">${lockedSig.dynamic.candlesElapsed} candle${lockedSig.dynamic.candlesElapsed!==1?'s':''} ago</span>`:''}
           </span>
-          ${_dismissBtn}
+          ${isLocked?`<button onclick="invalidateSignal('${coin}','${activeTF}','dismissed');selectCoin('${coin}')" style="font-size:9px;background:rgba(255,77,77,0.1);color:var(--red);border:1px solid var(--red-b);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">✕ Dismiss</button>`:''}
         </div>
         <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.lE,dec)}</span></div>
         <div class="srow" style="${setup.levAdjustedLong?'background:rgba(74,158,255,0.05);border-radius:6px;padding:6px 4px;margin-bottom:2px':''}">
@@ -2998,7 +2478,8 @@ async function renderDetail(coin,klines,mtfData){
       <!-- Short setup -->
       <div class="card" style="border-left:3px solid var(--red)${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         <div class="card-title" style="color:var(--red);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-          <span>Short setup ${_shortBadge}
+          <span>Short setup ${isLocked?`<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>`:''}
+          ${isLocked&&lockedSig?`<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">${lockedSig.dynamic.candlesElapsed} candle${lockedSig.dynamic.candlesElapsed!==1?'s':''} ago</span>`:''}
           </span>
         </div>
         <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.sE,dec)}</span></div>
@@ -3138,10 +2619,9 @@ async function renderDetail(coin,klines,mtfData){
     },50);
   },100);
   renderScanBody();
-  if (!IS_MOBILE) setTimeout(function(){ runProximityMonitor(); }, 2000); // fire after render settles
 
   // Store context for manual AI button
-  pendingAIContext = {coin, ta, sc, setup, klines, mtfData, liqZones, cvdData, obData};
+  pendingAIContext = {coin, ta, sc, setup, klines, mtfData, liqZones, cvdData};
   window._lastCvdData = cvdData;
   window._lastTA = ta;
 
@@ -3149,7 +2629,21 @@ async function renderDetail(coin,klines,mtfData){
   if(activeMode==='swing' && lockedSig && !lockedSig.isSecondary){
     runPhase2ReEval(lockedSig, klines, cvdData, d.oiNotional||0, dec);
   }
-  // Post-sweep TG alert now handled by runProximityMonitor (Stage 2)
+  // Post-sweep Telegram alert — fires immediately on sweep confirmation, no AI needed
+  if(liqZones){
+    const sweep = detectPostSweepConfirmation(klines, liqZones, dec);
+    if(sweep && sweep.confirmed){
+      const sweepKey = coin+'_'+activeTF+'_sweep_alert';
+      const lastFired = sessionStorage.getItem(sweepKey);
+      const candleTime = getCurrentCandleTime(activeTF);
+      if(lastFired !== String(candleTime)){
+        sessionStorage.setItem(sweepKey, String(candleTime));
+        sendSweepAlert(coin, sweep, ta, setup, dec);
+        console.log('Sweep alert fired:', coin, sweep.side, sweep.sweepLevel);
+      }
+    }
+  }
+}
 
 function renderScanBody(){
   const tbody=document.getElementById('scan-tbody');if(!tbody)return;
@@ -3159,15 +2653,13 @@ function renderScanBody(){
   }).sort((a,b)=>b.sc-a.sc);
   const bc=sc=>sc>=7?'var(--green)':sc>=5?'var(--amber)':'var(--red)';
   tbody.innerHTML=rows.map(({c,sc,d,ta})=>{
-    const adjSc=applyLearningWeight(sc,'swing');
-    const v=verdictOf(adjSc);const dec=COINS[c].dec;const ch=d.change24h||0;
+    const v=verdictOf(sc);const dec=COINS[c].dec;const ch=d.change24h||0;
     let tl='Neutral';
     if(ta.trend==='bullish')tl='Bullish';else if(ta.trend==='mild-bullish')tl='Mild bull';
     else if(ta.trend==='bearish')tl='Bearish';else if(ta.trend==='mild-bearish')tl='Mild bear';
-    const scDisp = Math.abs(adjSc-sc)>=0.1 ? sc+'→'+adjSc : sc;
     return`<tr class="${c===activeCoin?'arow':''}" onclick="selectCoin('${c}')">
       <td style="font-weight:500">${c}</td>
-      <td><div class="smbar"><div class="smtrack"><div class="smfill" style="width:${adjSc*10}%;background:${bc(adjSc)}"></div></div>${scDisp}/10</div></td>
+      <td><div class="smbar"><div class="smtrack"><div class="smfill" style="width:${sc*10}%;background:${bc(sc)}"></div></div>${sc}/10</div></td>
       <td>$${fn(d.price,dec)}</td>
       <td class="${ch>=0?'pos':'neg'}">${fp(ch)}</td>
       <td>$${(d.oiNotional/1e9).toFixed(1)}B</td>
@@ -3232,56 +2724,6 @@ function seedPlaceholders(){
   });
 }
 // ── Layer 2: Funding history fetch (throttled to 8h per symbol) ──────────────
-// ── Entry Quality Score ──────────────────────────────────────────────────────
-var _obCache = {};
-
-async function fetchOrderBook(symbol) {
-  var now = Date.now();
-  if (_obCache[symbol] && now - _obCache[symbol].ts < 15000) return _obCache[symbol].data;
-  try {
-    var url = 'https://api.bybit.com/v5/market/orderbook?category=linear&symbol='+symbol+'&limit=50';
-    var r = await fetchWithTimeout(url, 3000);
-    if (r && r.result) { _obCache[symbol] = {data:r.result, ts:now}; return r.result; }
-  } catch(e) { console.warn('OB fetch failed:', e.message); }
-  return null;
-}
-
-function calcEntryQualityScore(ob, liqZones, price, atr, direction) {
-  if (!ob || !liqZones || !price || !atr) return null;
-  var zones = direction === 'long' ? liqZones.longLiqZones : liqZones.shortLiqZones;
-  var majorZones = zones.filter(function(z){ return z.leverage==='25x'||z.leverage==='50x'||z.leverage==='125x'; });
-  if (!majorZones.length) return null;
-  var nearZone = null, minDist = Infinity;
-  majorZones.forEach(function(z){
-    var dist = Math.abs(price - z.price);
-    if (dist < 1.5*atr && dist < minDist){ minDist=dist; nearZone=z; }
-  });
-  if (!nearZone) return null;
-  var bandLow = nearZone.price*0.995, bandHigh = nearZone.price*1.005;
-  var bids=ob.b||[], asks=ob.a||[];
-  var bidVol=0, askVol=0;
-  bids.forEach(function(b){ var p=parseFloat(b[0]); if(p>=bandLow&&p<=bandHigh) bidVol+=parseFloat(b[1]); });
-  asks.forEach(function(a){ var p=parseFloat(a[0]); if(p>=bandLow&&p<=bandHigh) askVol+=parseFloat(a[1]); });
-  var totalVol = bidVol+askVol;
-  if (totalVol < 0.0001) return {score:5, boost:0, label:'NEUTRAL', detail:'Thin book', nearZone:nearZone};
-  var domVol = direction==='long' ? bidVol : askVol;
-  var imb = (domVol/totalVol)*10;
-  var totBook=0;
-  bids.forEach(function(b){totBook+=parseFloat(b[1]);});
-  asks.forEach(function(a){totBook+=parseFloat(a[1]);});
-  var avgBand = totBook/50*1; // rough expected vol in 1% band
-  var volBonus = totalVol>avgBand*2?0.8:totalVol>avgBand*1.3?0.4:totalVol<avgBand*0.4?-0.5:0;
-  var score = +Math.min(10,Math.max(0,imb+volBonus)).toFixed(1);
-  var boost = score>=8?2.0:score>=6?1.0:score>=4?0:-0.5;
-  var label = score>=8?'HIGH':score>=6?'GOOD':score>=4?'NEUTRAL':'WEAK';
-  var detail = direction==='long'
-    ? 'Bid '+bidVol.toFixed(1)+' vs Ask '+askVol.toFixed(1)+' near '+nearZone.leverage+' zone'
-    : 'Ask '+askVol.toFixed(1)+' vs Bid '+bidVol.toFixed(1)+' near '+nearZone.leverage+' zone';
-  return {score:score, boost:+boost.toFixed(1), label:label, detail:detail,
-          nearZone:nearZone, bidVol:+bidVol.toFixed(2), askVol:+askVol.toFixed(2)};
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function fetchFundingHistory(bybitSym) {
   const now = Date.now();
   const lastFetch = fundingLastFetch[bybitSym] || 0;
@@ -3433,13 +2875,13 @@ async function init(){
   const btn=document.getElementById('rbtn');
   btn.disabled=true;btn.textContent='↻ Refreshing...';
   klCache={};aiCache={};
-  try{loadSwingSignals();}catch(e){alert('loadSwingSignals: '+e.message);}
-  try{loadTradeLog();}catch(e){alert('loadTradeLog: '+e.message);}
-  try{seedInitialTrades();}catch(e){alert('seedInitialTrades: '+e.message);}
-  try{seedPlaceholders();}catch(e){alert('seedPlaceholders: '+e.message);}
+  loadSwingSignals();
+  loadTradeLog();
+  seedInitialTrades();
+  seedPlaceholders(); // show coins immediately before market data loads
   const scores={};Object.keys(COINS).forEach(c=>{scores[c]=5;});
-  try{renderSidebar(scores);}catch(e){alert('renderSidebar: '+e.message); console.error(e);}
-  try{renderAlerts(scores);}catch(e){console.error(e);}
+  renderSidebar(scores);
+  renderAlerts(scores);
   const trackedSyms = Object.values(COINS).map(c=>c.sym);
   if (!SKIP_WS) {
     connectBybitWS(trackedSyms);
@@ -3474,6 +2916,7 @@ async function init(){
       new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
     ]);
     const source = await marketPromise;
+    console.log('Market data source:', source);
     try{
       const fg=await fetchWithTimeout('https://api.alternative.me/fng/?limit=1',4000);
       const val=parseInt(fg.data[0]?.value||50);
@@ -3504,7 +2947,7 @@ async function init(){
       newScores[c]=scoreSignal(c,calcTA(kl),null);
     });
     renderSidebar(newScores);renderAlerts(newScores);
-    try{ await renderDetail(activeCoin,klines,mtfData); }catch(e){ alert('renderDetail: '+e.message); console.error(e); }
+    await renderDetail(activeCoin,klines,mtfData);
     cleanupLiqQueue();
     const wsEl=document.getElementById('ws-status');
     if(wsEl) wsEl.innerHTML=getWSStatusHTML();
@@ -3859,14 +3302,11 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
     const patternConf  = ai?.pattern?.confidence || 'low';
     const patternStage = ai?.pattern?.stage || 'none';
 
-    // Apply learning weight — adjusted score used for ALL gates
-    const adjSc = applyLearningWeight(sc, setup && setup.signalType ? setup.signalType : 'swing');
-
     // Gate 1: score + confidence + stage — LOW conviction never fires, forming never fires
     const patternReady = patternStage === 'confirmed' || patternStage === 'near breakout';
-    const confOk       = patternConf === 'high' || (patternConf === 'medium' && adjSc >= 7);
-    if (adjSc < 7 || !confOk || !patternReady) {
-      console.log('Alert skipped (adj '+adjSc+'/10, raw '+sc+'/10):', patternConf, patternStage);
+    const confOk       = patternConf === 'high' || (patternConf === 'medium' && sc >= 7);
+    if (sc < 7 || !confOk || !patternReady) {
+      console.log('Alert skipped:', sc+'/10', patternConf, patternStage);
       return;
     }
 
@@ -3879,11 +3319,11 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
     // Gate 3: deduplication — one alert per coin per daily candle, regardless of TF
     const alertKey = coin + '_signal_alert';
     const candleTime = getCurrentCandleTime('1d'); // always use daily candle for dedup
-    if (localStorage.getItem(alertKey) === String(candleTime)) {
+    if (sessionStorage.getItem(alertKey) === String(candleTime)) {
       console.log('Alert already sent this daily candle:', alertKey);
       return;
     }
-    localStorage.setItem(alertKey, String(candleTime));
+    sessionStorage.setItem(alertKey, String(candleTime));
     const pe = ai?.patternEntry || {};
     const safeNum = (v, fallback) => (v && !isNaN(parseFloat(v))) ? parseFloat(v) : fallback;
 
@@ -3929,11 +3369,7 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
       shortMaxSafeLev: setup.shortMaxSafeLev || calcMaxSafeLeverage(sE, sSL),
       suggestedAction: ai?.suggestedAction || '',
       watchLevel: ai?.watchLevel || '',
-      funding: d.funding.toFixed(4),
-      preBreakoutLong:  d.price > 0 && d.price < lE,
-      preBreakoutShort: d.price > 0 && d.price > sE,
-      nowEntryLong:  d.price > 0 && d.price < lE  ? +d.price.toFixed(dec) : null,
-      nowEntryShort: d.price > 0 && d.price > sE  ? +d.price.toFixed(dec) : null
+      funding: d.funding.toFixed(4)
     };
     const r = await fetch('/api/alert', {
       method: 'POST',
@@ -4363,22 +3799,6 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
     }
   }
   if(patternEl){
-    // Pre-compute pattern levels HTML to avoid nested template literals (Chrome V8 strict mode rejects them)
-    var patternLevelsHtml = '';
-    if(pe.longEntry||pe.shortEntry){
-      patternLevelsHtml = '<div class="pattern-levels">'
-        + '<div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$' + fn(rPe.longEntry,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$' + fn(rPe.longStop,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$' + fn(rPe.longTP1,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$' + fn(rPe.longTP2,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$' + fn(rPe.shortEntry,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$' + fn(rPe.shortStop,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$' + fn(rPe.shortTP1,dec) + '</div></div>'
-        + '<div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$' + fn(rPe.shortTP2,dec) + '</div></div>'
-        + (pat.patternTarget ? '<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$' + fn(pat.patternTarget,dec) + '</div></div>' : '')
-        + (pat.patternInvalidation ? '<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$' + fn(pat.patternInvalidation,dec) + '</div></div>' : '')
-        + '</div>';
-    }
     patternEl.innerHTML=`
       <div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div>
       <div class="pattern-header">
@@ -4386,13 +3806,25 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         <div class="pattern-badges">
           <span class="pbadge ${confCls}">Confidence: ${pat.confidence||'—'}</span>
           <span class="pbadge pb-stage">${pat.stage||'—'}</span>
-          ${pat.historicalWinRate?'<span class="pbadge pb-winrate">Win rate: '+pat.historicalWinRate+'</span>':''}
+          ${pat.historicalWinRate?`<span class="pbadge pb-winrate">Win rate: ${pat.historicalWinRate}</span>`:''}
         </div>
       </div>
       <p class="pattern-desc">${pat.description||'—'}</p>
-      ${patternLevelsHtml}
-      ${ai.watchLevel?'<div class="watch-level">Watch level: '+ai.watchLevel+'</div>':''}
-      ${ai.suggestedAction?'<div class="action-level">Action: '+ai.suggestedAction+'</div>':''}
+      ${pe.longEntry||pe.shortEntry?`
+      <div class="pattern-levels">
+        <div class="pl-item"><div class="pl-label">Pattern long entry</div><div class="pl-val vg">$${fn(rPe.longEntry,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern long stop</div><div class="pl-val vr">$${fn(rPe.longStop,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern long TP1</div><div class="pl-val vg">$${fn(rPe.longTP1,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern long TP2</div><div class="pl-val vg">$${fn(rPe.longTP2,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short entry</div><div class="pl-val vr">$${fn(rPe.shortEntry,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short stop</div><div class="pl-val vr">$${fn(rPe.shortStop,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short TP1</div><div class="pl-val vg">$${fn(rPe.shortTP1,dec)}</div></div>
+        <div class="pl-item"><div class="pl-label">Pattern short TP2</div><div class="pl-val vg">$${fn(rPe.shortTP2,dec)}</div></div>
+        ${pat.patternTarget?`<div class="pl-item"><div class="pl-label">Pattern target</div><div class="pl-val vp">$${fn(pat.patternTarget,dec)}</div></div>`:''}
+        ${pat.patternInvalidation?`<div class="pl-item"><div class="pl-label">Invalidation level</div><div class="pl-val vr">$${fn(pat.patternInvalidation,dec)}</div></div>`:''}
+      </div>`:''}
+      ${ai.watchLevel?`<div class="watch-level">Watch level: ${ai.watchLevel}</div>`:''}
+      ${ai.suggestedAction?`<div class="action-level">Action: ${ai.suggestedAction}</div>`:''}
     `;
   }
   const cCol=ai.conviction==='high'?'var(--green)':ai.conviction==='medium'?'var(--amber)':'var(--text3)';
@@ -4427,5 +3859,4 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
     `;
   }
 
-}
 }
