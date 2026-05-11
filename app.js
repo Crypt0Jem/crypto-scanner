@@ -837,44 +837,35 @@ async function api(params){
 }
 
 async function fetchMarket(){
-  // Fetch all data directly from Bybit browser API — no proxy needed
+  // Fetch prices via /api/market proxy (CoinGecko) — no direct Bybit calls
   const syms = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
-  const cgIds = {BTCUSDT:'bitcoin',ETHUSDT:'ethereum',SOLUSDT:'solana',XRPUSDT:'ripple',SUIUSDT:'sui'};
 
-  // Prices from Bybit (browser CORS works)
-  const tickerResults = await Promise.allSettled(syms.map(s =>
-    fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`, 6000)
-  ));
-
-  tickerResults.forEach((r, i) => {
-    const s = syms[i];
-    const coin = Object.keys(COINS).find(c => COINS[c].sym === s);
-    if (!coin) return;
-    let price = 0, change24h = 0, high24h = 0, low24h = 0, volume24h = 0;
-    if (r.status === 'fulfilled') {
-      const t = r.value?.result?.list?.[0];
-      if (t) {
-        price = parseFloat(t.lastPrice) || 0;
-        const open24 = parseFloat(t.prevPrice24h) || price;
-        change24h = open24 ? (price - open24) / open24 * 100 : 0;
-        high24h = parseFloat(t.highPrice24h) || 0;
-        low24h = parseFloat(t.lowPrice24h) || 0;
-        volume24h = parseFloat(t.turnover24h) || 0;
-      }
+  // Prices from CoinGecko via proxy
+  try {
+    const tickerData = await fetchWithTimeout('/api/market?type=tickers', 8000);
+    if (Array.isArray(tickerData)) {
+      tickerData.forEach(t => {
+        const coin = Object.keys(COINS).find(c => COINS[c].sym === t.symbol);
+        if (!coin) return;
+        const price = parseFloat(t.lastPrice) || 0;
+        const change24h = parseFloat(t.priceChangePercent) || 0;
+        mktData[coin] = {
+          price, change24h,
+          high24h: parseFloat(t.highPrice) || 0,
+          low24h: parseFloat(t.lowPrice) || 0,
+          volume24h: parseFloat(t.quoteVolume) || 0,
+          funding: 0, oi: 0, oiNotional: 0, fgValue: 50, fgLabel: 'Neutral'
+        };
+      });
     }
-    mktData[coin] = { price, change24h, high24h, low24h, volume24h, funding: 0, oi: 0, oiNotional: 0, fgValue: 50, fgLabel: 'Neutral' };
-  });
+  } catch(e) { console.warn('Tickers fetch failed:', e); }
 
-  // Funding + OI from Bybit (best effort)
+  // Funding + OI via proxy
   await Promise.allSettled(Object.entries(COINS).map(async ([coin, meta]) => {
     try {
-      const t = (await fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${meta.sym}`, 5000))?.result?.list?.[0];
-      if (t) {
-        mktData[coin].funding = parseFloat(t.fundingRate) * 100 || 0;
-        const oi = parseFloat(t.openInterest) || 0;
-        mktData[coin].oi = oi;
-        mktData[coin].oiNotional = oi * mktData[coin].price;
-      }
+      const fh = await fetchWithTimeout('/api/market?type=funding_history&symbol='+meta.sym+'&limit=1', 5000);
+      const rate = fh?.result?.list?.[0]?.fundingRate;
+      if (rate != null && mktData[coin]) mktData[coin].funding = parseFloat(rate) * 100 || 0;
     } catch(e) {}
   }));
 
@@ -3052,22 +3043,26 @@ async function init(){
     const marketPromise = Promise.race([
       (async()=>{
         const syms=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
-        const results=await Promise.all(syms.map(s=>
-          fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`,5000)
-        ));
-        results.forEach((r,i)=>{
-          const coin=Object.keys(COINS).find(c=>COINS[c].sym===syms[i]);
-          if(!coin)return;
-          const t=r?.result?.list?.[0];
-          if(!t)return;
-          const price=parseFloat(t.lastPrice)||0;
-          const open24=parseFloat(t.prevPrice24h)||price;
-          const oiVal = parseFloat(t.openInterest)||0;
-          const oiNotionalVal = oiVal*price;
-          mktData[coin]={price,change24h:open24?((price-open24)/open24*100):0,high24h:parseFloat(t.highPrice24h)||0,low24h:parseFloat(t.lowPrice24h)||0,volume24h:parseFloat(t.turnover24h)||0,funding:parseFloat(t.fundingRate)*100||0,oi:oiVal,oiNotional:oiNotionalVal,fgValue:mktData[coin]?.fgValue||50,fgLabel:mktData[coin]?.fgLabel||'Neutral'};
-          trackOIHistory(COINS[coin].sym, oiNotionalVal);
-        });
-        return 'bybit';
+        const tickerData = await fetchWithTimeout('/api/market?type=tickers', 8000);
+        if (Array.isArray(tickerData)) {
+          tickerData.forEach(t => {
+            const coin = Object.keys(COINS).find(c => COINS[c].sym === t.symbol);
+            if (!coin) return;
+            const price = parseFloat(t.lastPrice) || 0;
+            const change24h = parseFloat(t.priceChangePercent) || 0;
+            mktData[coin] = {
+              price, change24h,
+              high24h: parseFloat(t.highPrice) || 0,
+              low24h: parseFloat(t.lowPrice) || 0,
+              volume24h: parseFloat(t.quoteVolume) || 0,
+              funding: mktData[coin]?.funding || 0,
+              oi: 0, oiNotional: 0,
+              fgValue: mktData[coin]?.fgValue || 50,
+              fgLabel: mktData[coin]?.fgLabel || 'Neutral'
+            };
+          });
+        }
+        return 'proxy';
       })(),
       new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
     ]);
