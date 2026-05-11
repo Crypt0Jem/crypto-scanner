@@ -3000,29 +3000,53 @@ async function loadPrediction(coin, ta, klines, d, cvdData, kronosIP) {
 
       if (kronosResp.ok) {
         var raw = await kronosResp.json();
-        // Kronos returns { btc: {...}, sui: {...}, xrp: {...} }
-        // Each coin has: direction, predicted_price, current_price, change_pct, tp, sl, symbol
         var coinKey = coin.toLowerCase();
         var k = raw[coinKey];
         if (k) {
-          var isUp = k.direction && (k.direction.includes('UP') || k.direction.includes('📈'));
-          var movePct = k.change_pct != null ? parseFloat(k.change_pct) : 0;
+          var dirStr  = k.direction || '';
+          var isUp    = dirStr.includes('UP');
+          var isDown  = dirStr.includes('DOWN');
+          var isSide  = dirStr.includes('SIDEWAYS');
+          var movePct = parseFloat(k.change_pct) || 0;
           var absMov  = Math.abs(movePct);
-          // Confidence from magnitude of predicted move
-          var conf = Math.min(92, Math.round(50 + absMov * 20));
+
+          // Use pred_candles to get final predicted close (richer than predicted_price)
+          var predCandles  = k.pred_candles || [];
+          var lastPred     = predCandles.length ? predCandles[predCandles.length - 1] : null;
+          var predClose    = lastPred ? lastPred.close : k.predicted_price;
+          var predMovePct  = (predClose && k.current_price)
+            ? +((predClose - k.current_price) / k.current_price * 100).toFixed(3)
+            : movePct;
+
+          // If SIDEWAYS, derive direction from pred_candles movement
+          var finalDir;
+          if (isSide) {
+            finalDir = predMovePct > 0.05 ? 'long' : predMovePct < -0.05 ? 'short' : 'neutral';
+          } else {
+            finalDir = isUp ? 'long' : isDown ? 'short' : 'neutral';
+          }
+
+          // Confidence lower for SIDEWAYS, higher for clear direction
+          var conf = isSide
+            ? Math.min(58, 40 + absMov * 15)
+            : Math.min(92, 58 + absMov * 25);
+
+          var nextCandle = predCandles.length ? predCandles[0] : null;
+
           p = {
             source:          'kronos',
-            direction:       isUp ? 'long' : 'short',
-            confidence:      conf,
-            expectedMovePct: (movePct >= 0 ? '+' : '') + movePct.toFixed(3),
-            timeframe:       'next candle',
-            setupType:       absMov > 0.3 ? 'momentum' : 'coiling',
-            keyLevel:        isUp ? (k.sl || null) : (k.tp || null),
-            tp:              k.tp   || null,
-            sl:              k.sl   || null,
-            predictedPrice:  k.predicted_price || null,
-            currentPrice:    k.current_price   || null,
-            reasoning:       (k.symbol||coin) + ' ' + (k.direction||'') + ' — predicted $' + (k.predicted_price||'?')
+            direction:       finalDir,
+            confidence:      Math.round(conf),
+            expectedMovePct: (predMovePct >= 0 ? '+' : '') + predMovePct.toFixed(3),
+            timeframe:       predCandles.length ? predCandles.length + ' candles predicted' : 'next candle',
+            setupType:       isSide ? 'coiling' : absMov > 0.3 ? 'momentum' : 'reversal',
+            keyLevel:        finalDir === 'long' ? k.sl : k.tp,
+            tp:              k.tp || null,
+            sl:              k.sl || null,
+            predictedPrice:  predClose ? parseFloat(predClose).toFixed(4) : k.predicted_price,
+            nextHigh:        nextCandle ? nextCandle.high : null,
+            nextLow:         nextCandle ? nextCandle.low  : null,
+            reasoning:       (k.name||coin) + ': ' + dirStr + ' → $' + (predClose ? parseFloat(predClose).toFixed(4) : '?')
           };
         }
       }
@@ -3098,7 +3122,8 @@ async function loadPrediction(coin, ta, klines, d, cvdData, kronosIP) {
       + (p.confidence >= 65
         ? '<div style="margin-top:10px;padding:8px 10px;background:rgba(74,158,255,0.08);border:1px solid rgba(74,158,255,0.25);border-radius:6px;font-size:11px;font-family:var(--mono);color:var(--blue)">🎯 High confidence — consider entry if score ≥7 and CVD agrees</div>'
         : '<div style="margin-top:10px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--mono);color:var(--text3)">Below 65% confidence — wait for better setup</div>')
-      + (p.tp && p.sl ? '<div style="margin-top:8px;font-size:11px;font-family:var(--mono);color:var(--text3)">TP: <span style="color:var(--green)">$' + p.tp + '</span>  SL: <span style="color:var(--red)">$' + p.sl + '</span>' + (p.predictedPrice ? '  Predicted: <span style="color:var(--amber)">$' + p.predictedPrice + '</span>' : '') + '</div>' : '');
+      + (p.tp && p.sl ? '<div style="margin-top:8px;font-size:11px;font-family:var(--mono);color:var(--text3)">TP: <span style="color:var(--green)">$' + p.tp + '</span>  SL: <span style="color:var(--red)">$' + p.sl + '</span>' + (p.predictedPrice ? '  Final: <span style="color:var(--amber)">$' + p.predictedPrice + '</span>' : '') + '</div>' : '')
+      + (p.nextHigh && p.nextLow ? '<div style="font-size:10px;font-family:var(--mono);color:var(--text3);margin-top:4px">Next candle: H <span style="color:var(--green)">$' + parseFloat(p.nextHigh).toFixed(4) + '</span>  L <span style="color:var(--red)">$' + parseFloat(p.nextLow).toFixed(4) + '</span></div>' : '');
 
 }
 
