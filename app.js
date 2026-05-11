@@ -2992,14 +2992,18 @@ async function loadPrediction(coin, ta, klines, d, cvdData, kronosIP) {
   if (kronosIP) {
     try {
       var controller = new AbortController();
-      var timeout = setTimeout(function(){ controller.abort(); }, 6000);
+      var timeout = setTimeout(function(){ controller.abort(); }, 8000);
       var kronosResp = await fetch('http://' + kronosIP + ':5000/api/analyze', {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
         signal: controller.signal
       });
       clearTimeout(timeout);
-
-      if (kronosResp.ok) {
-        var raw = await kronosResp.json();
+      if (!kronosResp.ok) throw new Error('HTTP ' + kronosResp.status);
+      var rawText = await kronosResp.text();
+      if (!rawText || rawText.trim() === '') throw new Error('Empty response from Kronos');
+      var raw = JSON.parse(rawText);
         var coinKey = coin.toLowerCase();
         var k = raw[coinKey];
         if (k) {
@@ -3049,9 +3053,8 @@ async function loadPrediction(coin, ta, klines, d, cvdData, kronosIP) {
             reasoning:       (k.name||coin) + ': ' + dirStr + ' → $' + (predClose ? parseFloat(predClose).toFixed(4) : '?')
           };
         }
-      }
     } catch(e) {
-      console.log('Kronos unreachable, using Claude Haiku:', e.message);
+      console.log('Kronos error:', e.message);
     }
   }
 
@@ -3073,7 +3076,8 @@ async function loadPrediction(coin, ta, klines, d, cvdData, kronosIP) {
       p.source = 'claude-haiku';
     } catch(e2) {
       if (el) el.innerHTML = '<div class="card-title" style="color:var(--blue)">⚡ Pre-signal prediction</div>'
-        + '<div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Unavailable — ' + e2.message + '</div>';
+      + '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:10px">Unavailable: ' + e2.message + '</div>'
+      + '<button onclick="loadPrediction(activeCoin,window._lastTA||{},pendingAIContext&&pendingAIContext.klines||[],mktData[activeCoin]||{},window._lastCvdData,localStorage.getItem(\'kronosIP\')||\'\')" style="font-size:11px;padding:6px 14px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);font-family:var(--mono);cursor:pointer">↻ Retry</button>';
       return;
     }
   }
