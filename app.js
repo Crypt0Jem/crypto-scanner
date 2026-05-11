@@ -1557,28 +1557,15 @@ function scoreSignal(coin,ta,mtf){
   var liqPts = liqEvents.length>=10?3:liqEvents.length>=5?2:liqEvents.length>=2?1:0;
   s+=liqPts; breakdown.liq=liqPts;
 
-  // 2. CVD DIVERGENCE / CONFIRMATION (25% — real order flow)
-  // Divergence = price moving one way, money flowing the other = highest conviction
+  // 2. CVD DIVERGENCE / FLIP (25% — real order flow)
   var cvd=window._lastCvdData;
   var cvdPts=0;
-  var signalDir = ta.trend==='bullish'||ta.trend==='mild-bullish' ? 'long' : 'short'; // default from trend
   if(cvd){
-    var buyPct  = parseFloat(cvd.buyPct)  || 50;
-    var sellPct = parseFloat(cvd.sellPct) || 50;
-    var priceBullish = ta.trend==='bullish'||ta.trend==='mild-bullish';
-    var priceBearish = ta.trend==='bearish'||ta.trend==='mild-bearish';
-    // Strong divergence: price going one way, money strongly the other
-    var strongBearishDiv = priceBullish && sellPct >= 53; // price up, sellers dominant → short signal
-    var strongBullishDiv = priceBearish && buyPct  >= 53; // price down, buyers dominant → long signal
-    if(strongBearishDiv){ cvdPts=3; signalDir='short'; }       // strongest signal — fade the move
-    else if(strongBullishDiv){ cvdPts=3; signalDir='long'; }   // strongest signal — fade the move
-    else if(cvd.divergence){ cvdPts=2; }                        // pre-computed divergence
-    else if(cvd.trend==='bullish'&&priceBullish){ cvdPts=1; signalDir='long'; }   // confirms trend
-    else if(cvd.trend==='bearish'&&priceBearish){ cvdPts=1; signalDir='short'; }  // confirms trend
-    // CVD mild contradiction or neutral → 0, keep trend direction
+    if(cvd.divergence)cvdPts=2;
+    else if(cvd.trend==='bullish'&&ta.trend!=='bearish')cvdPts=1;
+    else if(cvd.trend==='bearish'&&ta.trend!=='bullish')cvdPts=1;
   }
   s+=cvdPts; breakdown.cvd=cvdPts;
-  window._lastSignalDir = signalDir; // store for verdictOf
 
   // 3. MTF CONFLUENCE (20% — prevents trend-fighting)
   var mtfPts=0;
@@ -1633,31 +1620,28 @@ function scoreSignal(coin,ta,mtf){
 }
 
 function verdictOf(sc, ta, cvd){
-  // Use CVD-computed signal direction if available (set by scoreSignal)
-  var sigDir = window._lastSignalDir || (ta && (ta.trend==='bullish'||ta.trend==='mild-bullish') ? 'long' : 'short');
-  var isLong  = sigDir === 'long';
+  // ta and cvd optional — falls back gracefully if not passed
+  var trend = ta ? ta.trend : 'neutral';
   var cvdTrend = cvd ? cvd.trend : null;
-  var trendDir = ta && (ta.trend==='bullish'||ta.trend==='mild-bullish') ? 'long' : 'short';
-  // Counter-trend = CVD signal opposes price trend
-  var isCounterTrend = sigDir !== trendDir;
+  var isBull = trend==='bullish'||trend==='mild-bullish';
+  var isBear = trend==='bearish'||trend==='mild-bearish';
+  var cvdAgreesLong  = cvdTrend==='bullish'||cvdTrend===null;
+  var cvdAgreesShort = cvdTrend==='bearish'||cvdTrend===null;
 
   if(sc>=7){
-    if(isLong)  return isCounterTrend
-      ? {text:'⚠ Counter Long',  cls:'cbw'}
-      : {text:'⚡ Long setup',   cls:'cbl'};
-    return isCounterTrend
-      ? {text:'⚠ Counter Short', cls:'cbw'}
-      : {text:'⚡ Short setup',  cls:'cbs'};
+    if(isBull&&cvdAgreesLong)  return{text:'⚡ Long setup', cls:'cbl'};
+    if(isBear&&cvdAgreesShort) return{text:'⚡ Short setup',cls:'cbs'};
+    if(isBull&&!cvdAgreesLong) return{text:'⚠ Counter-trend Long', cls:'cbw'};
+    if(isBear&&!cvdAgreesShort)return{text:'⚠ Counter-trend Short',cls:'cbw'};
+    return{text:'⚡ High score',cls:'cbl'};
   }
   if(sc>=5){
-    if(isLong)  return isCounterTrend
-      ? {text:'👁 Watch Short (div)', cls:'cbw'}  // divergence watch
-      : {text:'👁 Watch Long',  cls:'cbw'};
-    return isCounterTrend
-      ? {text:'👁 Watch Long (div)',  cls:'cbw'}  // divergence watch
-      : {text:'👁 Watch Short', cls:'cbw'};
+    if(isBull)return{text:'👁 Watch Long', cls:'cbw'};
+    if(isBear)return{text:'👁 Watch Short',cls:'cbw'};
+    return{text:'👁 Watch',cls:'cbw'};
   }
-  return{text:'Neutral', cls:'cbn'};
+  if(sc>=3)return{text:'Neutral',cls:'cbn'};
+  return{text:'No signal',cls:'cbn'};
 }
 
 async function setLev(lev,btn){
@@ -2434,12 +2418,9 @@ async function renderDetail(coin,klines,mtfData){
           <span class="cbadge ${v.cls}" style="margin-left:6px">${v.text}</span>
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
-        <div class="score-box">
-          <div class="score-num" style="color:${scColor}">${sc}<span style="font-size:15px;color:var(--text3)">/10</span></div>
-          <div class="score-lbl">Signal score</div>
-        </div>
-        <button onclick="copySignalSnapshot()" style="font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);font-family:var(--mono);cursor:pointer">📋 Copy snapshot</button>
+      <div class="score-box">
+        <div class="score-num" style="color:${scColor}">${sc}<span style="font-size:15px;color:var(--text3)">/10</span></div>
+        <div class="score-lbl">Signal score</div>
       </div>
     </div>
     ${(function(){
@@ -2951,81 +2932,6 @@ function checkForRealSweep(sig, currentPrice) {
     if (hit && Math.abs(ev.price-currentPrice)<atr*2) return {hit:true,price:ev.price,side:ev.side,qty:ev.qty,timestamp:ev.timestamp};
   }
   return {hit:false};
-}
-
-function copySignalSnapshot() {
-  var ctx  = pendingAIContext || {};
-  var coin = ctx.coin || activeCoin;
-  var ta   = ctx.ta   || window._lastTA   || {};
-  var sc   = ctx.sc   || 0;
-  var setup= ctx.setup|| {};
-  var cvd  = window._lastCvdData || {};
-  var bd   = window._lastScoreBreakdown || {};
-  var d    = mktData[coin] || {};
-  var dec  = (COINS[coin]||{}).dec || 4;
-  var liqZ = ctx.liqZones || {};
-  var mtf  = ctx.mtfData  || {};
-  var ob   = window._lastOB || null;
-
-  // Score breakdown line
-  var bdLabels = {liq:'Liq',cvd:'CVD',mtf:'MTF',vol:'Vol',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI'};
-  var bdLine = Object.keys(bd).filter(function(k){return bd[k]!==0;}).map(function(k){
-    return (bdLabels[k]||k)+' '+(bd[k]>0?'+':'')+bd[k];
-  }).join(' | ');
-
-  // Nearest liq zones
-  var nearLong  = (liqZ.longLiqZones  ||[])[0] || {};
-  var nearShort = (liqZ.shortLiqZones ||[])[0] || {};
-
-  // Open positions
-  var openPos = tradeLog.filter(function(t){return t.status==='open';}).map(function(t){
-    var live = (mktData[t.symbol]||{}).price||0;
-    var pnl  = live>0 ? calcTradePnl(t.entryPrice,live,t.direction,t.leverage) : null;
-    return t.symbol+' '+t.direction.toUpperCase()+' '+t.leverage+'x @ $'+t.entryPrice+(pnl!==null?' → '+(pnl>=0?'+':'')+pnl.toFixed(2)+'%':'');
-  }).join('\n');
-
-  var now = new Date().toUTCString();
-  var utcH = new Date().getUTCHours();
-  var session = (utcH>=13&&utcH<16)?'London+NY overlap':(utcH>=8&&utcH<16)?'London':(utcH>=16&&utcH<21)?'NY':'Asia';
-
-  var snap = [
-    '━━━ SIGNAL SNAPSHOT ━━━',
-    now,
-    '',
-    coin+'/USDT  '+activeTF+'  '+activeMode.toUpperCase()+' mode',
-    'Price:   $'+fn(d.price,dec)+'  ('+fp(d.change24h||0)+')',
-    'Score:   '+sc+'/10  — '+(bdLine||'no breakdown'),
-    'Verdict: '+(verdictOf(sc,ta,cvd).text||'—'),
-    'Signal dir: '+(window._lastSignalDir||'—')+(window._lastSignalDir!=(ta.trend==='bullish'||ta.trend==='mild-bullish'?'long':'short')?' ⚠ CVD divergence overrides trend':''),
-    '',
-    '— INDICATORS —',
-    'RSI:      '+((ta.rsi||0).toFixed(1))+(ta.rsi>70?' ⚠ overbought':ta.rsi<30?' ⚠ oversold':''),
-    'Trend:    '+(ta.trend||'—'),
-    'VolSpike: '+(ta.volumeSpike||'—')+'x',
-    'Funding:  '+(d.funding!=null?d.funding.toFixed(4)+'%':'—'),
-    'CVD:      '+(cvd.trend||'—')+'  buy '+(cvd.buyPct||'?')+'% / sell '+(cvd.sellPct||'?')+'%'+(cvd.divergence?' ⚠ DIVERGENCE':''),
-    'MTF:      '+(mtf.confluenceLabel||'—')+' (score '+(mtf.confluenceScore||0)+')',
-    'Session:  '+session,
-    ob?'OB imbal: '+ob.imbalance+'% (bid '+ob.bidVol.toFixed(0)+' vs ask '+ob.askVol.toFixed(0)+')':'OB: not loaded',
-    '',
-    '— SETUPS —',
-    'Long:  entry $'+fn(setup.lE,dec)+'  stop $'+fn(setup.lSL,dec)+'  TP1 $'+fn(setup.lTP1,dec)+'  TP2 $'+fn(setup.lTP2,dec),
-    'Short: entry $'+fn(setup.sE,dec)+'  stop $'+fn(setup.sSL,dec)+'  TP1 $'+fn(setup.sTP1,dec)+'  TP2 $'+fn(setup.sTP2,dec),
-    '',
-    '— LIQ ZONES —',
-    'Nearest long liq:  $'+(nearLong.price||'—')+' ('+( nearLong.leverage||'—')+')',
-    'Nearest short liq: $'+(nearShort.price||'—')+' ('+(nearShort.leverage||'—')+')',
-    '',
-    openPos?('— OPEN POSITIONS —\n'+openPos):'No open positions',
-    '━━━━━━━━━━━━━━━━━━━━━━'
-  ].join('\n');
-
-  navigator.clipboard.writeText(snap).then(function(){
-    var btn = document.querySelector('button[onclick="copySignalSnapshot()"]');
-    if(btn){ btn.textContent='✓ Copied!'; setTimeout(function(){ btn.textContent='📋 Copy snapshot'; },2000); }
-  }).catch(function(){
-    prompt('Copy this snapshot:', snap);
-  });
 }
 
 async function init(){
