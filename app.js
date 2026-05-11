@@ -897,7 +897,7 @@ async function fetchKlines(coin,tf){
     // Use manual AbortController for iOS Safari compatibility (AbortSignal.timeout not supported pre-iOS 16.4)
     const controller = new AbortController();
     const timer = setTimeout(function(){ controller.abort(); }, IS_MOBILE ? 6000 : 8000);
-    const r=await fetch('https://api.bybit.com/v5/market/kline?category=linear&symbol='+COINS[coin].sym+'&interval='+bybitInterval+'&limit=100',{signal:controller.signal});
+    const r=await fetch('/api/market?type=klines&symbol='+COINS[coin].sym+'&interval='+bybitInterval+'&limit=100',{signal:controller.signal});
     clearTimeout(timer);
     const j=await r.json();
     const list=j?.result?.list;
@@ -1455,7 +1455,7 @@ async function fetchCVDData(coin, tf) {
   try {
     const sym = COINS[coin].sym;
     const r = await fetchWithTimeout(
-      `https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=${sym}&limit=1000`,
+      `/api/market?type=trades&symbol=${sym}&limit=1000`,
       8000
     );
     const trades = r?.result?.list;
@@ -1531,7 +1531,7 @@ async function fetchCVDData(coin, tf) {
 async function fetchOrderBook(sym, clusterPrice) {
   try {
     var r = await fetchWithTimeout(
-      'https://api.bybit.com/v5/market/orderbook?category=linear&symbol=' + sym + '&limit=50', 4000
+      '/api/market?type=orderbook&symbol=' + sym + '&limit=50', 4000
     );
     var bids = r?.result?.b || [];
     var asks = r?.result?.a || [];
@@ -2815,7 +2815,7 @@ async function fetchFundingHistory(bybitSym) {
   }
   try {
     const r = await fetchWithTimeout(
-      'https://api.bybit.com/v5/market/funding/history?category=linear&symbol='+bybitSym+'&limit=8',
+      '/api/market?type=funding_history&symbol='+bybitSym+'&limit=8',
       6000
     );
     const list = r?.result?.list || [];
