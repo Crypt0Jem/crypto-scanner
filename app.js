@@ -1,4 +1,12 @@
 const APP_VERSION='phase3-ws-v1';
+// Pre-fill Kronos IP from localStorage on load
+document.addEventListener('DOMContentLoaded', function() {
+  var saved = localStorage.getItem('kronosIP') || '';
+  var inp = document.getElementById('kronos-ip-input');
+  var sta = document.getElementById('kronos-status');
+  if (inp && saved) inp.value = saved;
+  if (sta && saved) { sta.textContent = '✓ Kronos active — ' + saved; sta.style.color = 'var(--green)'; }
+});
 
 // Device detection — skip heavy ops on mobile/iOS
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
@@ -1627,8 +1635,20 @@ function scoreSignal(coin,ta,mtf){
   var oiM=sym?calcOIMomentum(sym):null;
   if(oiM&&oiM.spike){ s=Math.max(0,s-1); breakdown.oiPenalty=-1; }
 
+  // 9. AI PREDICTION CONFIDENCE (bonus — from predict endpoint)
+  var pred = window._lastPrediction;
+  var predPts = 0;
+  if (pred && pred.confidence >= 75 && pred.direction !== 'neutral') {
+    // Only score if prediction agrees with CVD signal direction
+    if (pred.direction === signalDir) predPts = 2;
+    else if (pred.direction !== signalDir) predPts = -1; // prediction disagrees = caution
+  } else if (pred && pred.confidence >= 65 && pred.direction === signalDir) {
+    predPts = 1;
+  }
+  s += predPts; breakdown.pred = predPts;
+
   var final=Math.min(10,Math.max(0,Math.round(s)));
-  window._lastScoreBreakdown=breakdown; // store for display
+  window._lastScoreBreakdown=breakdown;
   return final;
 }
 
@@ -2601,6 +2621,12 @@ async function renderDetail(coin,klines,mtfData){
         <div class="pattern-note" id="pattern-short-note">Analyzing chart pattern for refined entry...</div>
       </div>
 
+      <!-- Kronos-style prediction card — auto-runs on render -->
+      <div class="pattern-card full" id="predict-section" style="border-color:rgba(74,158,255,0.3)">
+        <div class="card-title" style="color:var(--blue)">⚡ Pre-signal prediction — AI direction model</div>
+        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Analyzing ${klines.length} candles...</div>
+      </div>
+
       <!-- Pattern Recognition -->
       <div class="pattern-card full" id="pattern-section">
         <div class="card-title" style="color:var(--purple)">Chart pattern recognition — Claude AI</div>
@@ -2702,6 +2728,8 @@ async function renderDetail(coin,klines,mtfData){
   pendingAIContext = {coin, ta, sc, setup, klines, mtfData, liqZones, cvdData};
   window._lastCvdData = cvdData;
   window._lastTA = ta;
+  // Fire prediction in background — doesn't block render
+  loadPrediction(coin, ta, klines, d, cvdData, localStorage.getItem('kronosIP')||'');
   // Fetch order book in background (fire-and-forget, used by scoreSignal next render)
   if(liqZones){
     var obCluster = (liqZones.longLiqZones||[])[0]||{price:d.price};
@@ -2951,6 +2979,138 @@ function checkForRealSweep(sig, currentPrice) {
     if (hit && Math.abs(ev.price-currentPrice)<atr*2) return {hit:true,price:ev.price,side:ev.side,qty:ev.qty,timestamp:ev.timestamp};
   }
   return {hit:false};
+}
+
+async function loadPrediction(coin, ta, klines, d, cvdData, kronosIP) {
+  var el = document.getElementById('predict-section');
+  if (!el) return;
+
+  var p = null;
+
+  // ── Direct browser call to Kronos on SuiPlay ─────────────────────────────
+  // Browser can reach local network directly — Vercel cannot
+  if (kronosIP) {
+    try {
+      var controller = new AbortController();
+      var timeout = setTimeout(function(){ controller.abort(); }, 6000);
+      var kronosResp = await fetch('http://' + kronosIP + ':5000/api/analyze', {
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+
+      if (kronosResp.ok) {
+        var raw = await kronosResp.json();
+        // Map Kronos format to our format
+        // raw has { xrp: {...}, btc: {...}, sui: {...} }
+        var coinKey = coin.toLowerCase();
+        var k = raw[coinKey] || raw[Object.keys(raw)[0]];
+        if (k) {
+          var isUp = (k.direction || '').includes('UP') || (k.predicted_price > k.current_price);
+          var movePct = k.change_pct != null ? k.change_pct : (k.predicted_price && k.current_price
+            ? +((k.predicted_price - k.current_price) / k.current_price * 100).toFixed(3) : 0);
+          // Confidence from how far predicted vs current
+          var absMov = Math.abs(movePct);
+          var conf = Math.min(95, Math.round(50 + absMov * 15));
+          p = {
+            source:          'kronos',
+            direction:       isUp ? 'long' : 'short',
+            confidence:      conf,
+            expectedMovePct: (movePct >= 0 ? '+' : '') + movePct,
+            timeframe:       'next candle',
+            setupType:       absMov > 0.5 ? 'momentum' : 'coiling',
+            keyLevel:        isUp ? k.sl : k.tp,
+            tp:              k.tp,
+            sl:              k.sl,
+            predictedPrice:  k.predicted_price,
+            reasoning:       coin + ' ' + (isUp ? 'UP' : 'DOWN') + ' ' + (movePct >= 0 ? '+' : '') + movePct + '% predicted'
+          };
+        }
+      }
+    } catch(e) {
+      console.log('Kronos unreachable, using Claude Haiku:', e.message);
+    }
+  }
+
+  // ── Fallback: Claude Haiku via Vercel ─────────────────────────────────────
+  if (!p) {
+    try {
+      var resp = await fetch('/api/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coin: coin, tf: activeTF, candles: klines.slice(-50),
+          price: d.price, funding: d.funding || 0,
+          cvdBuyPct: cvdData ? (cvdData.buyPct || 50) : 50,
+          rsi: ta.rsi || 50, trend: ta.trend || 'neutral'
+        })
+      });
+      p = await resp.json();
+      if (p.error) throw new Error(p.error);
+      p.source = 'claude-haiku';
+    } catch(e2) {
+      if (el) el.innerHTML = '<div class="card-title" style="color:var(--blue)">⚡ Pre-signal prediction</div>'
+        + '<div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Unavailable — ' + e2.message + '</div>';
+      return;
+    }
+  }
+
+    // Color by direction + confidence
+    var dirCol  = p.direction === 'long' ? 'var(--green)' : p.direction === 'short' ? 'var(--red)' : 'var(--text3)';
+    var dirIcon = p.direction === 'long' ? '▲' : p.direction === 'short' ? '▼' : '●';
+    var confCol = p.confidence >= 70 ? 'var(--green)' : p.confidence >= 50 ? 'var(--amber)' : 'var(--red)';
+    var confBar = Math.round(p.confidence / 10); // 0-10 blocks
+
+    // Confidence bar
+    var bar = '';
+    for (var i = 0; i < 10; i++) {
+      bar += '<span style="display:inline-block;width:16px;height:8px;border-radius:2px;margin-right:2px;background:'
+        + (i < confBar ? dirCol : 'var(--bg4)') + '"></span>';
+    }
+
+    // Feed confidence into score (store for scoreSignal to use next refresh)
+    window._lastPrediction = p;
+
+    var setupBadge = p.setupType && p.setupType !== 'none'
+      ? '<span style="font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(74,158,255,0.15);color:var(--blue);font-family:var(--mono);margin-left:8px">' + p.setupType.toUpperCase() + '</span>'
+      : '';
+
+    var sourceTag = p.source === 'kronos'
+      ? '<span style="font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(0,229,187,0.15);color:var(--green);font-family:var(--mono);margin-left:8px">KRONOS</span>'
+      : '<span style="font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(255,255,255,0.08);color:var(--text3);font-family:var(--mono);margin-left:8px">CLAUDE HAIKU</span>';
+
+    el.innerHTML = '<div class="card-title" style="color:var(--blue)">⚡ Pre-signal prediction' + sourceTag + '</div>'
+      + '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<div style="font-size:28px;font-weight:700;font-family:var(--mono);color:' + dirCol + '">'
+      + dirIcon + ' ' + p.direction.toUpperCase() + setupBadge + '</div>'
+      + '<div>'
+      + '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">Confidence</div>'
+      + '<div>' + bar + '</div>'
+      + '<div style="font-size:12px;font-family:var(--mono);color:' + confCol + ';margin-top:3px">' + p.confidence + '%</div>'
+      + '</div>'
+      + '<div style="margin-left:auto;text-align:right">'
+      + '<div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Expected move</div>'
+      + '<div style="font-size:18px;font-weight:700;font-family:var(--mono);color:' + dirCol + '">' + (p.expectedMovePct || '—') + '%</div>'
+      + '<div style="font-size:10px;color:var(--text3);font-family:var(--mono)">' + (p.timeframe || '') + '</div>'
+      + '</div>'
+      + '</div>'
+      + (p.keyLevel ? '<div style="font-size:11px;font-family:var(--mono);color:var(--text2);margin-bottom:6px">Key level: <span style="color:var(--amber)">$' + p.keyLevel + '</span></div>' : '')
+      + '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);font-style:italic">' + (p.reasoning || '') + '</div>'
+      + (p.confidence >= 65
+        ? '<div style="margin-top:10px;padding:8px 10px;background:rgba(74,158,255,0.08);border:1px solid rgba(74,158,255,0.25);border-radius:6px;font-size:11px;font-family:var(--mono);color:var(--blue)">🎯 High confidence — consider entry if score ≥7 and CVD agrees</div>'
+        : '<div style="margin-top:10px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--mono);color:var(--text3)">Below 65% confidence — wait for better setup</div>')
+      + (p.tp && p.sl ? '<div style="margin-top:8px;font-size:11px;font-family:var(--mono);color:var(--text3)">Kronos TP: <span style="color:var(--green)">$' + p.tp + '</span>  SL: <span style="color:var(--red)">$' + p.sl + '</span></div>' : '');
+
+}
+
+function saveKronosIP() {
+  var ip = (document.getElementById('kronos-ip-input')||{}).value || '';
+  if (ip) localStorage.setItem('kronosIP', ip.trim());
+  else localStorage.removeItem('kronosIP');
+  // Refresh the IP row display
+  var saved = localStorage.getItem('kronosIP') || '';
+  var statusEl = document.getElementById('kronos-status');
+  if (statusEl) statusEl.textContent = saved ? '✓ Kronos active — ' + saved : 'Using Claude Haiku fallback';
+  if (statusEl) statusEl.style.color = saved ? 'var(--green)' : 'var(--text3)';
 }
 
 function copySignalSnapshot() {
