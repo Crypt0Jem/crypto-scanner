@@ -1929,111 +1929,6 @@ function getLeverageSuitability(entry, stop, selectedLev) {
   return { maxSafe, stopDist, isOk, rating, color, emoji };
 }
 
-function buildCustomChart(klines, setup, dec, lev) {
-  const canvas = document.getElementById('custom-chart');
-  if (!canvas || !klines || klines.length < 2) return;
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const wrap = canvas.parentElement;
-  canvas.width = wrap.clientWidth * dpr;
-  canvas.height = wrap.clientHeight * dpr;
-  canvas.style.width = wrap.clientWidth + 'px';
-  canvas.style.height = wrap.clientHeight + 'px';
-  ctx.scale(dpr, dpr);
-  const W = wrap.clientWidth, H = wrap.clientHeight;
-  const PAD = { t: 20, r: 70, b: 30, l: 10 };
-  const cW = W - PAD.l - PAD.r, cH = H - PAD.t - PAD.b;
-
-  // Show last 60 candles
-  const data = klines.slice(-60);
-  const allPrices = [
-    ...data.map(k => k.h), ...data.map(k => k.l),
-    setup.lE, setup.lSL, setup.lTP2, setup.sE, setup.sSL, setup.sTP2,
-    setup.lLiq || 0, setup.sLiq || 0
-  ].filter(Boolean);
-  const minP = Math.min(...allPrices) * 0.998;
-  const maxP = Math.max(...allPrices) * 1.002;
-  const range = maxP - minP;
-
-  const xScale = i => PAD.l + (i / (data.length - 1)) * cW;
-  const yScale = p => PAD.t + (1 - (p - minP) / range) * cH;
-  const candleW = Math.max(2, (cW / data.length) * 0.7);
-
-  // Background
-  ctx.fillStyle = '#181818';
-  ctx.fillRect(0, 0, W, H);
-
-  // Grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 5; i++) {
-    const y = PAD.t + (i / 5) * cH;
-    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
-    const price = maxP - (i / 5) * range;
-    ctx.fillStyle = '#444';
-    ctx.font = '9px DM Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('$' + price.toFixed(dec > 2 ? 2 : dec), W - PAD.r + 4, y + 3);
-  }
-
-  // Draw level lines
-  function drawLevel(price, color, label, dash = []) {
-    if (!price || price <= 0) return;
-    const y = yScale(price);
-    if (y < PAD.t - 5 || y > H - PAD.b + 5) return;
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.setLineDash(dash);
-    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = color;
-    ctx.font = 'bold 9px DM Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(label, W - PAD.r + 4, y + 3);
-    ctx.restore();
-  }
-
-  drawLevel(setup.lTP2, '#00d084', 'TP2', [4,3]);
-  drawLevel(setup.lTP1, '#00d084', 'TP1', [4,3]);
-  drawLevel(setup.lE, '#4a9eff', 'L.Entry', [6,2]);
-  drawLevel(setup.sE, '#f5a623', 'S.Entry', [6,2]);
-  drawLevel(setup.lSL, '#ff4d4d', 'L.Stop', [3,3]);
-  drawLevel(setup.sSL, '#ff4d4d', 'S.Stop', [3,3]);
-  if (setup.lLiq) drawLevel(setup.lLiq, 'rgba(255,77,77,0.4)', 'L.Liq', [2,4]);
-  if (setup.sLiq) drawLevel(setup.sLiq, 'rgba(255,77,77,0.4)', 'S.Liq', [2,4]);
-
-  // Draw candles
-  data.forEach((k, i) => {
-    const x = xScale(i);
-    const isUp = k.c >= k.o;
-    const color = isUp ? '#00d084' : '#ff4d4d';
-    const yH = yScale(k.h), yL = yScale(k.l);
-    const yO = yScale(k.o), yC = yScale(k.c);
-
-    // Wick
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, yH); ctx.lineTo(x, yL);
-    ctx.stroke();
-
-    // Body
-    ctx.fillStyle = color;
-    const bodyTop = Math.min(yO, yC);
-    const bodyH = Math.max(1, Math.abs(yC - yO));
-    ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
-  });
-
-  // Current price line
-  const lastClose = data[data.length - 1].c;
-  const y = yScale(lastClose);
-  ctx.strokeStyle = '#4a9eff';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 2]);
-  ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
-  ctx.setLineDash([]);
-}
 
 // ── CVD mini-chart — delta bars (bottom 40%) + cumulative line (top 55%) ─────
 function buildCVDChart(klines, cvdData) {
@@ -2720,38 +2615,6 @@ async function renderDetail(coin,klines,mtfData){
         <div class="tv-wrap"><div class="tradingview-widget-container" id="tv-chart" style="height:100%;width:100%"></div></div>
       </div>
 
-      <!-- Custom chart with auto levels -->
-      <div class="card full">
-        <div class="card-title">Trade levels chart — entry, stops & targets drawn automatically</div>
-        <div class="chart-legend">
-          <span class="cl-item"><span class="cl-line" style="background:#4a9eff"></span>Price</span>
-          <span class="cl-item"><span class="cl-line" style="background:#00d084;border-top:2px dashed #00d084"></span>Long entry</span>
-          <span class="cl-item"><span class="cl-line" style="background:#ff4d4d;border-top:2px dashed #ff4d4d"></span>Stop loss</span>
-          <span class="cl-item"><span class="cl-line" style="background:#00d084"></span>TP1 / TP2</span>
-          <span class="cl-item"><span class="cl-line" style="background:#f5a623"></span>Short entry</span>
-          <span class="cl-item"><span class="cl-line" style="background:#ff4d4d;opacity:.5"></span>Liquidation</span>
-        </div>
-        <div class="chart-canvas-wrap">
-          <canvas id="custom-chart" role="img" aria-label="${coin} price chart with trade levels drawn"></canvas>
-        </div>
-        <!-- CVD / Order Flow Delta -->
-        <div style="margin-top:10px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;flex-wrap:wrap;gap:6px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:var(--text3);font-family:var(--mono)">Order flow — CVD (Cumulative Volume Delta)</span>
-              <span style="font-size:9px;color:${cvdData.trend==='bullish'?'var(--green)':cvdData.trend==='bearish'?'var(--red)':'var(--text2)'};font-family:var(--mono);font-weight:600">${cvdData.trend.toUpperCase()}</span>
-            </div>
-            ${cvdData.divergence
-              ? `<span style="font-size:9px;padding:2px 8px;border-radius:3px;font-family:var(--mono);background:${cvdData.divergence.type==='bearish'?'rgba(255,77,77,.2)':'rgba(0,208,132,.2)'};color:${cvdData.divergence.type==='bearish'?'var(--red)':'var(--green)'}">${cvdData.divergence.label}</span>`
-              : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">No divergence</span>'
-            }
-          </div>
-          <div class="cvd-canvas-wrap">
-            <canvas id="cvd-chart" role="img" aria-label="CVD order flow delta chart"></canvas>
-          </div>
-        </div>
-      </div>
-
       <!-- Leverage card -->
       <div class="lev-card full" id="lev-card">
         <div class="card-title" style="color:var(--red)">Leverage analysis — ${activeLev}x
@@ -2928,11 +2791,9 @@ async function renderDetail(coin,klines,mtfData){
 
   buildTVChart(coin,activeTF);
   setTimeout(()=>{
-    if(!IS_MOBILE) buildCustomChart(klines,setup,dec,activeLev);
     buildLevCard(d.price,setup,activeLev,dec);
     // redraw after lev card updates setup with liq prices
     setTimeout(function(){
-      if(!IS_MOBILE) buildCustomChart(klines,setup,dec,activeLev);
       if(!IS_MOBILE) buildCVDChart(klines,cvdData);
     },50);
   },100);
