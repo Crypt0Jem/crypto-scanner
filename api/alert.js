@@ -19,8 +19,13 @@ export default async function handler(req, res) {
       rsi, trend, funding, fgValue, leverage,
       liqLong, liqShort, suggestedAction, watchLevel,
       stopDistPct, maxSafeStopPct, longMaxSafeLev, shortMaxSafeLev,
-      preBreakoutLong, preBreakoutShort, nowEntryLong, nowEntryShort
+      preBreakoutLong, preBreakoutShort, nowEntryLong, nowEntryShort,
+      bonusPOC, bonusBB, bonusRSIDiv, bonusBOS, bonusVWAP
     } = req.body;
+
+    // Bonus count for Prime detection
+    const bonusCount = [bonusPOC, bonusBB, bonusRSIDiv, bonusBOS, bonusVWAP].filter(Boolean).length;
+    const isPrime = parseInt(score) >= 8 && bonusCount >= 3;
 
     // Evaluate confluences for each direction independently
     const sc = parseInt(score);
@@ -81,11 +86,23 @@ export default async function handler(req, res) {
     const biasEmoji = primaryBias === 'long' ? '🟢' : primaryBias === 'short' ? '🔴' : '🟡';
     const convTag = conviction === 'high' ? '🔥 HIGH' : conviction === 'medium' ? '⚡ MED' : '📊 LOW';
     const levTag = lev > 1 ? ` @ ${lev}x` : '';
+    const signalTag = isPrime ? '🔥 PRIME SIGNAL' : 'SIGNAL';
 
-    let msg = `${biasEmoji} *SIGNAL — ${coin}/USDT${levTag}*\n`;
+    // Bonus chips line for prime alerts
+    const bonusLabels = [];
+    if(bonusBB)      bonusLabels.push('BB squeeze');
+    if(bonusVWAP)    bonusLabels.push('VWAP reclaim');
+    if(bonusBOS)     bonusLabels.push('BOS');
+    if(bonusRSIDiv)  bonusLabels.push('RSI div');
+    if(bonusPOC)     bonusLabels.push('POC');
+
+    let msg = `${biasEmoji} *${signalTag} — ${coin}/USDT${levTag}*\n`;
     msg += `━━━━━━━━━━━━━━━━━\n`;
     msg += `📊 Score: *${score}/10* | ${tf.toUpperCase()} | Conviction: ${convTag}\n`;
     msg += `💰 Price: *$${fmt(price)}*\n`;
+    if(isPrime && bonusLabels.length > 0){
+      msg += `✨ Bonuses: ${bonusLabels.join(' · ')}\n`;
+    }
     msg += `🤖 Signal: *${primaryBias.toUpperCase()}* ${primaryBias==='long'?'🟢':'🔴'} — ${
       longConfluence && shortConfluence ? 'both setups aligned' :
       longConfluence ? 'long confluences met' : 'short confluences met'
