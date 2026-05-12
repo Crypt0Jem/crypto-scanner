@@ -2530,6 +2530,7 @@ async function renderDetail(coin,klines,mtfData){
   const fundingMom  = calcFundingMomentum(fundingHist);
   const oiMom       = calcOIMomentum(bybitSym);
   const sc=scoreSignal(coin,ta,mtfData,klines);
+  const isPrime = sc>=8 && (window._lastBonusCount||0)>=3;
   let liqZones=null;
   try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
   catch(e){ console.warn('LiqZones failed:',e); }
@@ -2742,8 +2743,9 @@ async function renderDetail(coin,klines,mtfData){
       ${sweepCardHtml}
       ${needsReviewHtml}
       <!-- Long setup -->
-      <div class="card" style="border-left:3px solid var(--green)${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
-        <div class="card-title" style="color:var(--green);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--green)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
+        ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/5 bonuses stacked</span></div>':''}
+        <div class="card-title" style="${isPrime?'color:#a78bfa':'color:var(--green)'};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
           <span>Long setup ${isLocked?'<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>':''}
           ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
           </span>
@@ -2780,8 +2782,9 @@ async function renderDetail(coin,klines,mtfData){
       </div>
 
       <!-- Short setup -->
-      <div class="card" style="border-left:3px solid var(--red)${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
-        <div class="card-title" style="color:var(--red);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--red)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
+        ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/5 bonuses stacked</span></div>':''}
+        <div class="card-title" style="${isPrime?'color:#a78bfa':'color:var(--red)'};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
           <span>Short setup ${isLocked?'<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>':''}
           ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
           </span>
