@@ -2613,11 +2613,6 @@ async function renderDetail(coin,klines,mtfData){
 
   const scColor=sc>=7?'var(--green)':sc>=5?'var(--amber)':sc>=3?'var(--text2)':'var(--red)';
   const chCls=d.change24h>=0?'pos':'neg';
-  const bullP=Math.min(85,Math.max(20,35+sc*5+(ta.trend==='bullish'?12:ta.trend==='mild-bullish'?6:0)));
-  const bearP=100-bullP;
-  const pm=(ta.atr/d.price*100);
-  const bullT=+(d.price*(1+pm/100)).toFixed(dec);
-  const bearT=+(d.price*(1-pm/100)).toFixed(dec);
 
   let tCol='var(--text2)',tLbl='Neutral';
   if(ta.trend==='bullish'){tCol='var(--green)';tLbl='Bullish';}
@@ -2844,6 +2839,11 @@ async function renderDetail(coin,klines,mtfData){
             </div>
           </div>
         </div>
+        <div class="metrics-grid" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+          <div class="metric"><div class="mlbl">Key support</div><div class="mval vb">$${fn(ta.support,dec)}</div><div class="msub">Pivot low</div></div>
+          <div class="metric"><div class="mlbl">Resistance</div><div class="mval va">$${fn(ta.resistance,dec)}</div><div class="msub">Pivot high</div></div>
+          <div class="metric"><div class="mlbl">Volume POC</div><div class="mval vb">$${fn(ta.poc,dec>2?2:dec)}</div><div class="msub">Highest volume</div></div>
+        </div>
         ${renderBonusRow(ta, dec)}
       </div>
 
@@ -2857,7 +2857,6 @@ async function renderDetail(coin,klines,mtfData){
               ${oiMom.spike?'SPIKE: '+oiMom.changePct+'% — forced liqs likely':oiMom.trend==='rising'?'+'+oiMom.changePct+'% building':oiMom.trend==='falling'?oiMom.changePct+'% unwinding':'Stable'}
             </div>
           </div>
-          <div class="oic"><div class="oil">Funding rate</div><div class="oiv" style="color:${fCol}">${d.funding.toFixed(4)}%</div><div class="ois">Positive = longs pay</div></div>
           <div class="oic"><div class="oil">OI signal</div><div class="oiv" style="font-size:10px;color:var(--text2)">${d.funding<0.005?'Longs underfunded':d.funding>0.04?'Overleveraged long':'Balanced'}</div></div>
         </div>
       </div>
@@ -2866,24 +2865,6 @@ async function renderDetail(coin,klines,mtfData){
       <div class="card">
         <div class="card-title">Volume profile — ${activeTF}</div>
         ${volHTML||'<span style="font-size:10px;color:var(--text3);font-family:var(--mono)">Insufficient data</span>'}
-      </div>
-
-      <!-- Predictive -->
-      <div class="card full">
-        <div class="card-title">Predictive movement model</div>
-        <div class="prow">
-          <span class="pk">Bull scenario — +${pm.toFixed(2)}% (1 ATR)</span>
-          <div class="pright"><span class="pval vg">$${fn(bullT,dec)}</span><div class="pbar-w"><div class="pbar" style="width:${bullP}%;background:var(--green)"></div></div><span class="ppct">${bullP}%</span></div>
-        </div>
-        <div class="prow">
-          <span class="pk">Bear scenario — -${pm.toFixed(2)}% (1 ATR)</span>
-          <div class="pright"><span class="pval vr">$${fn(bearT,dec)}</span><div class="pbar-w"><div class="pbar" style="width:${bearP}%;background:var(--red)"></div></div><span class="ppct">${bearP}%</span></div>
-        </div>
-        <div class="pred-levels">
-          <div class="metric"><div class="mlbl">Key support</div><div class="mval vb">$${fn(ta.support,dec)}</div></div>
-          <div class="metric"><div class="mlbl">Key resistance</div><div class="mval va">$${fn(ta.resistance,dec)}</div></div>
-          <div class="metric"><div class="mlbl">Volume POC</div><div class="mval vb">$${fn(ta.poc,dec>2?2:dec)}</div></div>
-        </div>
       </div>
 
       <!-- AI Analysis summary -->
@@ -3187,7 +3168,7 @@ function copySignalSnapshot() {
   var ob   = window._lastOB || null;
 
   // Score breakdown line
-  var bdLabels = {liq:'Liq',cvd:'CVD',mtf:'MTF',vol:'Vol',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI'};
+  var bdLabels = {liq:'Liq',cvd:'CVD',mtf:'MTF',vol:'Vol',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI',poc:'POC',bb:'BB sqz',rsiDiv:'RSI div',bos:'BOS',vwap:'VWAP'};
   var bdLine = Object.keys(bd).filter(function(k){return bd[k]!==0;}).map(function(k){
     return (bdLabels[k]||k)+' '+(bd[k]>0?'+':'')+bd[k];
   }).join(' | ');
