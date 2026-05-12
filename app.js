@@ -837,35 +837,44 @@ async function api(params){
 }
 
 async function fetchMarket(){
-  // Fetch prices via /api/market proxy (CoinGecko) — no direct Bybit calls
+  // Fetch all data directly from Bybit browser API — no proxy needed
   const syms = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
+  const cgIds = {BTCUSDT:'bitcoin',ETHUSDT:'ethereum',SOLUSDT:'solana',XRPUSDT:'ripple',SUIUSDT:'sui'};
 
-  // Prices from CoinGecko via proxy
-  try {
-    const tickerData = await fetchWithTimeout('/api/market?type=tickers', 8000);
-    if (Array.isArray(tickerData)) {
-      tickerData.forEach(t => {
-        const coin = Object.keys(COINS).find(c => COINS[c].sym === t.symbol);
-        if (!coin) return;
-        const price = parseFloat(t.lastPrice) || 0;
-        const change24h = parseFloat(t.priceChangePercent) || 0;
-        mktData[coin] = {
-          price, change24h,
-          high24h: parseFloat(t.highPrice) || 0,
-          low24h: parseFloat(t.lowPrice) || 0,
-          volume24h: parseFloat(t.quoteVolume) || 0,
-          funding: 0, oi: 0, oiNotional: 0, fgValue: 50, fgLabel: 'Neutral'
-        };
-      });
+  // Prices from Bybit (browser CORS works)
+  const tickerResults = await Promise.allSettled(syms.map(s =>
+    fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`, 6000)
+  ));
+
+  tickerResults.forEach((r, i) => {
+    const s = syms[i];
+    const coin = Object.keys(COINS).find(c => COINS[c].sym === s);
+    if (!coin) return;
+    let price = 0, change24h = 0, high24h = 0, low24h = 0, volume24h = 0;
+    if (r.status === 'fulfilled') {
+      const t = r.value?.result?.list?.[0];
+      if (t) {
+        price = parseFloat(t.lastPrice) || 0;
+        const open24 = parseFloat(t.prevPrice24h) || price;
+        change24h = open24 ? (price - open24) / open24 * 100 : 0;
+        high24h = parseFloat(t.highPrice24h) || 0;
+        low24h = parseFloat(t.lowPrice24h) || 0;
+        volume24h = parseFloat(t.turnover24h) || 0;
+      }
     }
-  } catch(e) { console.warn('Tickers fetch failed:', e); }
+    mktData[coin] = { price, change24h, high24h, low24h, volume24h, funding: 0, oi: 0, oiNotional: 0, fgValue: 50, fgLabel: 'Neutral' };
+  });
 
-  // Funding + OI via proxy
+  // Funding + OI from Bybit (best effort)
   await Promise.allSettled(Object.entries(COINS).map(async ([coin, meta]) => {
     try {
-      const fh = await fetchWithTimeout('/api/market?type=funding_history&symbol='+meta.sym+'&limit=1', 5000);
-      const rate = fh?.result?.list?.[0]?.fundingRate;
-      if (rate != null && mktData[coin]) mktData[coin].funding = parseFloat(rate) * 100 || 0;
+      const t = (await fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${meta.sym}`, 5000))?.result?.list?.[0];
+      if (t) {
+        mktData[coin].funding = parseFloat(t.fundingRate) * 100 || 0;
+        const oi = parseFloat(t.openInterest) || 0;
+        mktData[coin].oi = oi;
+        mktData[coin].oiNotional = oi * mktData[coin].price;
+      }
     } catch(e) {}
   }));
 
@@ -888,7 +897,7 @@ async function fetchKlines(coin,tf){
     // Use manual AbortController for iOS Safari compatibility (AbortSignal.timeout not supported pre-iOS 16.4)
     const controller = new AbortController();
     const timer = setTimeout(function(){ controller.abort(); }, IS_MOBILE ? 6000 : 8000);
-    const r=await fetch('/api/market?type=klines&symbol='+COINS[coin].sym+'&interval='+bybitInterval+'&limit=100',{signal:controller.signal});
+    const r=await fetch('https://api.bybit.com/v5/market/kline?category=linear&symbol='+COINS[coin].sym+'&interval='+bybitInterval+'&limit=100',{signal:controller.signal});
     clearTimeout(timer);
     const j=await r.json();
     const list=j?.result?.list;
@@ -1446,7 +1455,7 @@ async function fetchCVDData(coin, tf) {
   try {
     const sym = COINS[coin].sym;
     const r = await fetchWithTimeout(
-      `/api/market?type=trades&symbol=${sym}&limit=1000`,
+      `https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=${sym}&limit=1000`,
       8000
     );
     const trades = r?.result?.list;
@@ -1522,7 +1531,7 @@ async function fetchCVDData(coin, tf) {
 async function fetchOrderBook(sym, clusterPrice) {
   try {
     var r = await fetchWithTimeout(
-      '/api/market?type=orderbook&symbol=' + sym + '&limit=50', 4000
+      'https://api.bybit.com/v5/market/orderbook?category=linear&symbol=' + sym + '&limit=50', 4000
     );
     var bids = r?.result?.b || [];
     var asks = r?.result?.a || [];
@@ -1535,7 +1544,116 @@ async function fetchOrderBook(sym, clusterPrice) {
   } catch(e) { return null; }
 }
 
-function scoreSignal(coin,ta,mtf){
+// ── BONUS CONFLUENCE CALCULATORS ─────────────────────────────────────────────
+
+// BB Squeeze: bands are tightest in 20 candles AND price breaks in trend direction
+function calcBBSqueeze(klines,trend){
+  try{
+    var period=20,mult=2;
+    var cl=klines.map(function(k){return k.c;});
+    if(cl.length<period+2)return{squeeze:false,breakoutAligned:false};
+    // Current band width
+    function getBandWidth(slice){
+      var mean=slice.reduce(function(a,b){return a+b;},0)/slice.length;
+      var sd=Math.sqrt(slice.reduce(function(a,b){return a+Math.pow(b-mean,2);},0)/slice.length);
+      return sd*mult*2/mean; // normalised width
+    }
+    var currSlice=cl.slice(-period);
+    var currWidth=getBandWidth(currSlice);
+    // Check if this is the tightest in the last 20 bars (rolling window comparison)
+    var isSqueeze=true;
+    for(var i=1;i<=20;i++){
+      if(cl.length<period+i)break;
+      var prevWidth=getBandWidth(cl.slice(-period-i,-i));
+      if(prevWidth<=currWidth){isSqueeze=false;break;}
+    }
+    // Breakout: last candle closes beyond the band in trend direction
+    var mean=currSlice.reduce(function(a,b){return a+b;},0)/period;
+    var sd=Math.sqrt(currSlice.reduce(function(a,b){return a+Math.pow(b-mean,2);},0)/period);
+    var upperBand=mean+mult*sd;
+    var lowerBand=mean-mult*sd;
+    var lastClose=cl[cl.length-1];
+    var isBullish=trend==='bullish'||trend==='mild-bullish';
+    var breakoutAligned=(isBullish&&lastClose>upperBand)||(!isBullish&&lastClose<lowerBand);
+    return{squeeze:isSqueeze,breakoutAligned:breakoutAligned,upperBand:+upperBand.toFixed(4),lowerBand:+lowerBand.toFixed(4),bandwidth:+currWidth.toFixed(6)};
+  }catch(e){return{squeeze:false,breakoutAligned:false};}
+}
+
+// RSI Divergence: price makes new high/low but RSI does not (last 14 bars)
+function calcRSIDivergence(klines){
+  try{
+    if(klines.length<20)return{divergence:null};
+    var recent=klines.slice(-14);
+    var cl=recent.map(function(k){return k.c;});
+    // Compute RSI for each candle in window
+    function rsiAt(closes){
+      var g=0,l=0;
+      for(var i=1;i<closes.length;i++){var d=closes[i]-closes[i-1];if(d>0)g+=d;else l+=Math.abs(d);}
+      var n=closes.length-1||1;
+      return 100-(100/(1+(l===0?999:g/l)));
+    }
+    var firstHalfRsi=rsiAt(cl.slice(0,7));
+    var secondHalfRsi=rsiAt(cl.slice(7));
+    var firstHalfHigh=Math.max.apply(null,recent.slice(0,7).map(function(k){return k.h;}));
+    var secondHalfHigh=Math.max.apply(null,recent.slice(7).map(function(k){return k.h;}));
+    var firstHalfLow=Math.min.apply(null,recent.slice(0,7).map(function(k){return k.l;}));
+    var secondHalfLow=Math.min.apply(null,recent.slice(7).map(function(k){return k.l;}));
+    // Bearish divergence: price higher high, RSI lower high
+    var bearDiv=secondHalfHigh>firstHalfHigh&&secondHalfRsi<firstHalfRsi-2;
+    // Bullish divergence: price lower low, RSI higher low
+    var bullDiv=secondHalfLow<firstHalfLow&&secondHalfRsi>firstHalfRsi+2;
+    if(bearDiv)return{divergence:'bearish',label:'Bearish RSI div',desc:'Price new high, RSI lower — momentum fading'};
+    if(bullDiv)return{divergence:'bullish',label:'Bullish RSI div',desc:'Price new low, RSI higher — selling exhausted'};
+    return{divergence:null};
+  }catch(e){return{divergence:null};}
+}
+
+// Break of Structure: last candle closes above swing high (bullish BOS) or below swing low (bearish BOS)
+function calcBOS(klines,trend){
+  try{
+    if(klines.length<20)return{bos:false,type:null};
+    var lookback=klines.slice(-20,-1); // exclude last candle
+    var lastCandle=klines[klines.length-1];
+    var swingHigh=Math.max.apply(null,lookback.map(function(k){return k.h;}));
+    var swingLow=Math.min.apply(null,lookback.map(function(k){return k.l;}));
+    var isBullish=trend==='bullish'||trend==='mild-bullish';
+    var bullBOS=lastCandle.c>swingHigh&&isBullish;
+    var bearBOS=lastCandle.c<swingLow&&!isBullish;
+    if(bullBOS)return{bos:true,type:'bullish',level:+swingHigh.toFixed(4)};
+    if(bearBOS)return{bos:true,type:'bearish',level:+swingLow.toFixed(4)};
+    return{bos:false,type:null,swingHigh:+swingHigh.toFixed(4),swingLow:+swingLow.toFixed(4)};
+  }catch(e){return{bos:false,type:null};}
+}
+
+// VWAP Reclaim: price crossed back above/below VWAP in last 3 candles, in trend direction
+function calcVWAPReclaim(klines,trend){
+  try{
+    if(klines.length<10)return{reclaim:false,vwap:null};
+    // VWAP from last 50 candles (session proxy)
+    var window50=klines.slice(-50);
+    var cumTPV=0,cumVol=0;
+    window50.forEach(function(k){
+      var tp=(k.h+k.l+k.c)/3;
+      cumTPV+=tp*k.v;
+      cumVol+=k.v;
+    });
+    var vwap=cumVol>0?cumTPV/cumVol:null;
+    if(!vwap)return{reclaim:false,vwap:null};
+    // Look at last 3 candles: was price below VWAP then crossed above (bullish) or above then below (bearish)?
+    var recent3=klines.slice(-3);
+    var closes=recent3.map(function(k){return k.c;});
+    var isBullish=trend==='bullish'||trend==='mild-bullish';
+    // Bullish reclaim: prev close below VWAP, current close above
+    var bullReclaim=closes[0]<vwap&&closes[closes.length-1]>vwap&&isBullish;
+    // Bearish reclaim: prev close above VWAP, current close below
+    var bearReclaim=closes[0]>vwap&&closes[closes.length-1]<vwap&&!isBullish;
+    return{reclaim:bullReclaim||bearReclaim,type:bullReclaim?'bullish':'bearish',vwap:+vwap.toFixed(4)};
+  }catch(e){return{reclaim:false,vwap:null};}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function scoreSignal(coin,ta,mtf,klines){
   const d=mktData[coin];if(!d)return 0;
   var breakdown = {}; // track each factor for display
   var s=0;
@@ -1614,9 +1732,56 @@ function scoreSignal(coin,ta,mtf){
   if(ob&&Math.abs(ob.imbalance)>20)obPts=1;
   s+=obPts; breakdown.ob=obPts;
 
+  // 9. POC PROXIMITY — price at volume point of control (bonus: data already computed)
+  var pocPts=0;
+  if(ta.poc&&d.price){
+    var pocDist=Math.abs(d.price-ta.poc)/d.price*100;
+    if(pocDist<=0.3)pocPts=1; // within 0.3% of POC = key decision level
+  }
+  s+=pocPts; breakdown.poc=pocPts;
+
+  // 10. BB SQUEEZE — bands tightest in 20 candles, breakout in trend direction (requires klines)
+  var bbPts=0;
+  if(klines&&klines.length>=22){
+    var bbResult=calcBBSqueeze(klines,ta.trend);
+    if(bbResult.squeeze&&bbResult.breakoutAligned)bbPts=1;
+    window._lastBBResult=bbResult;
+  }
+  s+=bbPts; breakdown.bb=bbPts;
+
+  // 11. RSI DIVERGENCE — price vs RSI disagree on direction (requires klines)
+  var rsiDivPts=0;
+  if(klines&&klines.length>=20){
+    var rsiDivResult=calcRSIDivergence(klines);
+    if(rsiDivResult.divergence)rsiDivPts=1;
+    window._lastRSIDiv=rsiDivResult;
+  }
+  s+=rsiDivPts; breakdown.rsiDiv=rsiDivPts;
+
+  // 12. BREAK OF STRUCTURE — price closes beyond last swing high/low in trend direction
+  var bosPts=0;
+  if(klines&&klines.length>=20){
+    var bosResult=calcBOS(klines,ta.trend);
+    if(bosResult.bos)bosPts=1;
+    window._lastBOS=bosResult;
+  }
+  s+=bosPts; breakdown.bos=bosPts;
+
+  // 13. VWAP RECLAIM — price crossing back above/below VWAP in trade direction
+  var vwapPts=0;
+  if(klines&&klines.length>=10){
+    var vwapResult=calcVWAPReclaim(klines,ta.trend);
+    if(vwapResult.reclaim)vwapPts=1;
+    window._lastVWAP=vwapResult;
+  }
+  s+=vwapPts; breakdown.vwap=vwapPts;
+
   // OI spike penalty
   var oiM=sym?calcOIMomentum(sym):null;
   if(oiM&&oiM.spike){ s=Math.max(0,s-1); breakdown.oiPenalty=-1; }
+
+  // Track bonus count for Prime Setup detection
+  window._lastBonusCount=[pocPts,bbPts,rsiDivPts,bosPts,vwapPts].filter(function(x){return x>0;}).length;
 
   var final=Math.min(10,Math.max(0,Math.round(s)));
   window._lastScoreBreakdown=breakdown; // store for display
@@ -1631,7 +1796,14 @@ function verdictOf(sc, ta, cvd){
   var trendDir = ta && (ta.trend==='bullish'||ta.trend==='mild-bullish') ? 'long' : 'short';
   // Counter-trend = CVD signal opposes price trend
   var isCounterTrend = sigDir !== trendDir;
+  // Prime Setup: score 8+ AND 3+ bonus signals stacked
+  var bonusCount = window._lastBonusCount || 0;
+  var isPrime = sc >= 8 && bonusCount >= 3;
 
+  if(isPrime){
+    if(isLong) return{text:'🔥 Prime long',cls:'cbp'};
+    return{text:'🔥 Prime short',cls:'cbp'};
+  }
   if(sc>=7){
     if(isLong)  return isCounterTrend
       ? {text:'⚠ Counter Long',  cls:'cbw'}
@@ -2305,7 +2477,7 @@ async function renderDetail(coin,klines,mtfData){
   const fundingHist = IS_MOBILE ? [] : await fetchFundingHistory(bybitSym);
   const fundingMom  = calcFundingMomentum(fundingHist);
   const oiMom       = calcOIMomentum(bybitSym);
-  const sc=scoreSignal(coin,ta,mtfData);
+  const sc=scoreSignal(coin,ta,mtfData,klines);
   let liqZones=null;
   try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
   catch(e){ console.warn('LiqZones failed:',e); }
@@ -2435,7 +2607,7 @@ async function renderDetail(coin,klines,mtfData){
     </div>
     ${(function(){
       var bd=window._lastScoreBreakdown||{};
-      var labels={liq:'Liq zones',cvd:'CVD',mtf:'MTF',vol:'Volume',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI'};
+      var labels={liq:'Liq zones',cvd:'CVD',mtf:'MTF',vol:'Volume',taker:'Taker',session:'Session',rsi:'RSI',ob:'OB',oiPenalty:'OI',poc:'POC',bb:'BB squeeze',rsiDiv:'RSI div',bos:'BOS',vwap:'VWAP'};
       var items=Object.keys(bd).filter(function(k){return bd[k]!==0;}).map(function(k){
         var pts=bd[k];var col=pts>0?'var(--green)':pts<0?'var(--red)':'var(--text3)';
         return '<span style="font-size:9px;font-family:var(--mono);color:'+col+';background:rgba(255,255,255,0.05);padding:2px 5px;border-radius:3px">'+(labels[k]||k)+' '+(pts>0?'+':'')+pts+'</span>';
@@ -2806,7 +2978,7 @@ async function fetchFundingHistory(bybitSym) {
   }
   try {
     const r = await fetchWithTimeout(
-      '/api/market?type=funding_history&symbol='+bybitSym+'&limit=8',
+      'https://api.bybit.com/v5/market/funding/history?category=linear&symbol='+bybitSym+'&limit=8',
       6000
     );
     const list = r?.result?.list || [];
@@ -3043,26 +3215,22 @@ async function init(){
     const marketPromise = Promise.race([
       (async()=>{
         const syms=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','SUIUSDT'];
-        const tickerData = await fetchWithTimeout('/api/market?type=tickers', 8000);
-        if (Array.isArray(tickerData)) {
-          tickerData.forEach(t => {
-            const coin = Object.keys(COINS).find(c => COINS[c].sym === t.symbol);
-            if (!coin) return;
-            const price = parseFloat(t.lastPrice) || 0;
-            const change24h = parseFloat(t.priceChangePercent) || 0;
-            mktData[coin] = {
-              price, change24h,
-              high24h: parseFloat(t.highPrice) || 0,
-              low24h: parseFloat(t.lowPrice) || 0,
-              volume24h: parseFloat(t.quoteVolume) || 0,
-              funding: mktData[coin]?.funding || 0,
-              oi: 0, oiNotional: 0,
-              fgValue: mktData[coin]?.fgValue || 50,
-              fgLabel: mktData[coin]?.fgLabel || 'Neutral'
-            };
-          });
-        }
-        return 'proxy';
+        const results=await Promise.all(syms.map(s=>
+          fetchWithTimeout(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`,5000)
+        ));
+        results.forEach((r,i)=>{
+          const coin=Object.keys(COINS).find(c=>COINS[c].sym===syms[i]);
+          if(!coin)return;
+          const t=r?.result?.list?.[0];
+          if(!t)return;
+          const price=parseFloat(t.lastPrice)||0;
+          const open24=parseFloat(t.prevPrice24h)||price;
+          const oiVal = parseFloat(t.openInterest)||0;
+          const oiNotionalVal = oiVal*price;
+          mktData[coin]={price,change24h:open24?((price-open24)/open24*100):0,high24h:parseFloat(t.highPrice24h)||0,low24h:parseFloat(t.lowPrice24h)||0,volume24h:parseFloat(t.turnover24h)||0,funding:parseFloat(t.fundingRate)*100||0,oi:oiVal,oiNotional:oiNotionalVal,fgValue:mktData[coin]?.fgValue||50,fgLabel:mktData[coin]?.fgLabel||'Neutral'};
+          trackOIHistory(COINS[coin].sym, oiNotionalVal);
+        });
+        return 'bybit';
       })(),
       new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
     ]);
@@ -3560,7 +3728,13 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
       shortMaxSafeLev: setup.shortMaxSafeLev || calcMaxSafeLeverage(sE, sSL),
       suggestedAction: ai?.suggestedAction || '',
       watchLevel: ai?.watchLevel || '',
-      funding: d.funding.toFixed(4)
+      funding: d.funding.toFixed(4),
+      // Bonus confluence signals
+      bonusPOC:    (window._lastScoreBreakdown?.poc    || 0) > 0,
+      bonusBB:     (window._lastScoreBreakdown?.bb     || 0) > 0,
+      bonusRSIDiv: (window._lastScoreBreakdown?.rsiDiv || 0) > 0,
+      bonusBOS:    (window._lastScoreBreakdown?.bos    || 0) > 0,
+      bonusVWAP:   (window._lastScoreBreakdown?.vwap   || 0) > 0
     };
     const r = await fetch('/api/alert', {
       method: 'POST',
