@@ -2467,6 +2467,58 @@ function renderAlerts(scores){
   el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('')+'</div>';
 }
 
+function renderBonusRow(ta, dec){
+  var bb  = window._lastBBResult        || {};
+  var bos = window._lastBOS             || {};
+  var vw  = window._lastVWAP            || {};
+  var rd  = window._lastRSIDiv          || {};
+  var bd  = window._lastScoreBreakdown  || {};
+  var bonuses = [
+    { label:'BB squeeze',
+      on: !!(bb.squeeze && bb.breakoutAligned),
+      sub: bb.squeeze ? (bb.breakoutAligned ? 'Breakout aligned' : 'Squeeze, no breakout yet') : 'No squeeze',
+      detail: bb.bandwidth ? 'BW '+bb.bandwidth.toFixed(4) : '' },
+    { label:'VWAP reclaim',
+      on: !!vw.reclaim,
+      sub: vw.reclaim ? 'Reclaimed ('+vw.type+')' : (vw.vwap ? 'VWAP $'+fn(vw.vwap,dec) : 'No data'),
+      detail: '' },
+    { label:'Struct break',
+      on: !!bos.bos,
+      sub: bos.bos ? 'BOS '+bos.type+' @ $'+fn(bos.level,dec) : 'No break yet',
+      detail: bos.swingHigh ? 'H:$'+fn(bos.swingHigh,dec)+' L:$'+fn(bos.swingLow,dec) : '' },
+    { label:'RSI divergence',
+      on: !!rd.divergence,
+      sub: rd.divergence ? rd.label : 'No divergence',
+      detail: rd.divergence ? rd.desc : '' },
+    { label:'POC proximity',
+      on: (bd.poc||0)>0,
+      sub: (bd.poc||0)>0 ? 'At POC $'+fn(ta.poc,dec) : 'Away from POC',
+      detail: ta.poc ? '$'+fn(ta.poc,dec) : '' }
+  ];
+  var active = bonuses.filter(function(b){return b.on;}).length;
+  var hdrCol = active>=3?'var(--purple)':active>=1?'var(--green)':'var(--text3)';
+  var items = bonuses.map(function(b){
+    var col = b.on ? 'var(--green)' : 'var(--text3)';
+    var dot = b.on ? '\u25cf' : '\u25cb';
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:8px">'
+      +'<span style="color:'+col+';font-size:12px;flex-shrink:0;margin-top:1px">'+dot+'</span>'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="font-size:11px;font-family:var(--mono);color:'+col+';font-weight:'+(b.on?600:400)+'">'+b.label+'</div>'
+      +'<div style="font-size:10px;color:var(--text3);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+b.sub+'</div>'
+      +(b.detail&&!b.on ? '<div style="font-size:9px;color:rgba(255,255,255,.25);font-family:var(--mono)">'+b.detail+'</div>' : '')
+      +(b.detail&&b.on  ? '<div style="font-size:9px;color:rgba(0,208,132,.5);font-family:var(--mono)">'+b.detail+'</div>' : '')
+      +'</div>'
+      +'</div>';
+  }).join('');
+  return '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">'
+    +'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px">'
+    +'<span>Bonus confluence — '+active+'/5 active</span>'
+    +(active>=3 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">\U0001f525 Prime threshold met</span>' : '')
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 20px">'+items+'</div>'
+    +'</div>';
+}
+
 async function renderDetail(coin,klines,mtfData){
   const d=mktData[coin];
   const dec=COINS[coin].dec;
@@ -2789,6 +2841,7 @@ async function renderDetail(coin,klines,mtfData){
             </div>
           </div>
         </div>
+        ${renderBonusRow(ta, dec)}
       </div>
 
       <!-- OI -->
