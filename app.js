@@ -598,6 +598,34 @@ const TF_MS = { '1d':86400000, '4h':14400000, '1h':3600000, '15m':900000, '5m':3
 function getTfMs(tf){ return TF_MS[tf] || 3600000; }
 function getCurrentCandleTime(tf){ const ms=getTfMs(tf); return Math.floor(Date.now()/ms)*ms; }
 
+// ── Candle close confirmation ─────────────────────────────────────────────────
+// Bybit always returns the forming candle as the last entry.
+// A candle is confirmed (closed) when: its open time + interval < now
+function isCandleConfirmed(klines, tf){
+  if(!klines||klines.length===0) return true;
+  var last = klines[klines.length-1];
+  var ms   = getTfMs(tf);
+  return (last.t + ms) <= Date.now();
+}
+
+// Returns klines with the forming candle stripped if unconfirmed.
+// Always keeps at least 20 candles so calcs don't break.
+function getConfirmedKlines(klines, tf){
+  if(!klines||klines.length===0) return klines;
+  if(isCandleConfirmed(klines, tf)) return klines;
+  return klines.length > 20 ? klines.slice(0,-1) : klines;
+}
+
+// How far through the current candle are we? Returns 0-100%
+function candleProgress(klines, tf){
+  if(!klines||klines.length===0) return 100;
+  var last = klines[klines.length-1];
+  var ms   = getTfMs(tf);
+  var elapsed = Date.now() - last.t;
+  return Math.min(100, Math.round(elapsed / ms * 100));
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function loadSwingSignals(){
   try{
     const raw=localStorage.getItem('swingSignals_v1');
@@ -1732,6 +1760,11 @@ function scoreSignal(coin,ta,mtf,klines){
   if(ob&&Math.abs(ob.imbalance)>20)obPts=1;
   s+=obPts; breakdown.ob=obPts;
 
+  // Confirmed klines: strip forming candle so bonuses only fire on closed candles
+  var confirmedKlines = klines ? getConfirmedKlines(klines, activeTF) : klines;
+  var candleConfirmed = klines ? isCandleConfirmed(klines, activeTF) : true;
+  window._lastCandleConfirmed = candleConfirmed;
+
   // 9. POC PROXIMITY — price at volume point of control (bonus: data already computed)
   var pocPts=0;
   if(ta.poc&&d.price){
@@ -1742,8 +1775,8 @@ function scoreSignal(coin,ta,mtf,klines){
 
   // 10. BB SQUEEZE — bands tightest in 20 candles, breakout in trend direction (requires klines)
   var bbPts=0;
-  if(klines&&klines.length>=22){
-    var bbResult=calcBBSqueeze(klines,ta.trend);
+  if(confirmedKlines&&confirmedKlines.length>=22){
+    var bbResult=calcBBSqueeze(confirmedKlines,ta.trend);
     if(bbResult.squeeze&&bbResult.breakoutAligned)bbPts=1;
     window._lastBBResult=bbResult;
   }
@@ -1751,8 +1784,8 @@ function scoreSignal(coin,ta,mtf,klines){
 
   // 11. RSI DIVERGENCE — price vs RSI disagree on direction (requires klines)
   var rsiDivPts=0;
-  if(klines&&klines.length>=20){
-    var rsiDivResult=calcRSIDivergence(klines);
+  if(confirmedKlines&&confirmedKlines.length>=20){
+    var rsiDivResult=calcRSIDivergence(confirmedKlines);
     if(rsiDivResult.divergence)rsiDivPts=1;
     window._lastRSIDiv=rsiDivResult;
   }
@@ -1760,8 +1793,8 @@ function scoreSignal(coin,ta,mtf,klines){
 
   // 12. BREAK OF STRUCTURE — price closes beyond last swing high/low in trend direction
   var bosPts=0;
-  if(klines&&klines.length>=20){
-    var bosResult=calcBOS(klines,ta.trend);
+  if(confirmedKlines&&confirmedKlines.length>=20){
+    var bosResult=calcBOS(confirmedKlines,ta.trend);
     if(bosResult.bos)bosPts=1;
     window._lastBOS=bosResult;
   }
@@ -1769,8 +1802,8 @@ function scoreSignal(coin,ta,mtf,klines){
 
   // 13. VWAP RECLAIM — price crossing back above/below VWAP in trade direction
   var vwapPts=0;
-  if(klines&&klines.length>=10){
-    var vwapResult=calcVWAPReclaim(klines,ta.trend);
+  if(confirmedKlines&&confirmedKlines.length>=10){
+    var vwapResult=calcVWAPReclaim(confirmedKlines,ta.trend);
     if(vwapResult.reclaim)vwapPts=1;
     window._lastVWAP=vwapResult;
   }
@@ -2467,7 +2500,7 @@ function renderAlerts(scores){
   el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('')+'</div>';
 }
 
-function renderBonusRow(ta, dec){
+function renderBonusRow(ta, dec, klines){
   var bb  = window._lastBBResult        || {};
   var bos = window._lastBOS             || {};
   var vw  = window._lastVWAP            || {};
@@ -2510,10 +2543,17 @@ function renderBonusRow(ta, dec){
       +'</div>'
       +'</div>';
   }).join('');
+  var confirmed = window._lastCandleConfirmed !== false;
+  var progress  = klines ? candleProgress(klines, activeTF) : 100;
+  var candleNote = !confirmed
+    ? '<span style="background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.35);border-radius:3px;padding:1px 7px;font-size:9px">'
+      +'⚠ Candle forming — '+progress+'% complete — signals update on close</span>'
+    : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">✓ Closed candle</span>';
   return '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">'
-    +'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px">'
+    +'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     +'<span>Bonus confluence — '+active+'/5 active</span>'
-    +(active>=3 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">\U0001f525 Prime threshold met</span>' : '')
+    +candleNote
+    +(active>=3 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">🔥 Prime threshold met</span>' : '')
     +'</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 20px">'+items+'</div>'
     +'</div>';
@@ -2844,7 +2884,7 @@ async function renderDetail(coin,klines,mtfData){
           <div class="metric"><div class="mlbl">Resistance</div><div class="mval va">$${fn(ta.resistance,dec)}</div><div class="msub">Pivot high</div></div>
           <div class="metric"><div class="mlbl">Volume POC</div><div class="mval vb">$${fn(ta.poc,dec>2?2:dec)}</div><div class="msub">Highest volume</div></div>
         </div>
-        ${renderBonusRow(ta, dec)}
+        ${renderBonusRow(ta, dec, klines)}
       </div>
 
       <!-- OI -->
