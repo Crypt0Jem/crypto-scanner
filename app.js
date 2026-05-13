@@ -1792,6 +1792,8 @@ function scoreSignal(coin,ta,mtf,klines,forceDir){
 
   // 14. OI DELTA — bonus 6 (direction-aware, closed candles only)
   var oiDeltaPts = 0;
+  var sigIsLong  = signalDir === 'long';
+  var sigIsShort = signalDir === 'short';
   if (confirmedKlines) {
     var _oiHist = window._lastOIHistory;
     var _oidResult = calcOIDelta(_oiHist, ta.trend);
@@ -1804,8 +1806,8 @@ function scoreSignal(coin,ta,mtf,klines,forceDir){
   var fundingDeltaPts = 0;
   var _fd = window._lastFundingDelta;
   if (_fd) {
-    var sigIsLong7  = signalDir === 'long';
-    var sigIsShort7 = signalDir === 'short';
+    var sigIsLong7  = sigIsLong;
+    var sigIsShort7 = sigIsShort;
     var extremeOpposite = _fd.extreme && (
       (sigIsLong7  && _fd.direction === 'bearish') ||
       (sigIsShort7 && _fd.direction === 'bullish')
