@@ -2199,8 +2199,8 @@ async function fetchAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         // Signal quality
         signalDir: window._lastSignalDir||'neutral',
         score: sc,
-        scoreLong: scLong,
-        scoreShort: scShort,
+        scoreLong: window._scLong,
+        scoreShort: window._scShort,
         scoreBreakdown: {
           liq:bd.liq||0, cvd:bd.cvd||0, mtf:bd.mtf||0,
           vol:bd.vol||0, taker:bd.taker||0, session:bd.session||0,
@@ -2675,6 +2675,7 @@ async function renderDetail(coin,klines,mtfData){
   // Score both directions independently — use whichever is higher as primary
   const scLong  = scoreSignal(coin,ta,mtfData,klines,'long');
   const scShort = scoreSignal(coin,ta,mtfData,klines,'short');
+  window._scLong = scLong; window._scShort = scShort; // expose for fetchAI
   // Re-run primary direction last so window globals reflect the winning signal
   const primaryDir = scShort > scLong ? 'short' : 'long';
   const sc = scoreSignal(coin,ta,mtfData,klines,primaryDir);
