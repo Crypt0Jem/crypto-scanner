@@ -1828,7 +1828,7 @@ function verdictOf(sc, ta, cvd){
   var isCounterTrend = sigDir !== trendDir;
   // Prime Setup: score 8+ AND 3+ bonus signals stacked
   var bonusCount = window._lastBonusCount || 0;
-  var isPrime = sc >= 8 && bonusCount >= 3;
+  var isPrime = sc >= 8 && bonusCount >= 4;
 
   if(isPrime){
     if(isLong) return{text:'🔥 Prime long',cls:'cbp'};
@@ -2434,7 +2434,7 @@ function renderBonusRow(ta, dec, klines){
       detail: _fd2.latest !== undefined ? 'Latest: '+(_fd2.latest >= 0 ? '+' : '')+(_fd2.latest*1).toFixed(4)+'%' : '' }
   ];
   var active = bonuses.filter(function(b){return b.on;}).length;
-  var hdrCol = active>=3?'var(--purple)':active>=1?'var(--green)':'var(--text3)';
+  var hdrCol = active>=4?'var(--purple)':active>=1?'var(--green)':'var(--text3)';
   var items = bonuses.map(function(b){
     var col = b.on ? 'var(--green)' : 'var(--text3)';
     var dot = b.on ? '\u25cf' : '\u25cb';
@@ -2458,7 +2458,7 @@ function renderBonusRow(ta, dec, klines){
     +'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     +'<span>Bonus confluence — '+active+'/7 active</span>'
     +candleNote
-    +(active>=3 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">🔥 Prime threshold met</span>' : '')
+    +(active>=4 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">🔥 Prime threshold met</span>' : '')
     +'</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 20px">'+items+'</div>'
     +'</div>';
@@ -2479,7 +2479,7 @@ async function renderDetail(coin,klines,mtfData){
   window._lastOIDelta = calcOIDelta(oiHistory, ta.trend); // pre-compute for panel display
   const oiMom       = calcOIMomentum(bybitSym);
   const sc=scoreSignal(coin,ta,mtfData,klines);
-  const isPrime = sc>=8 && (window._lastBonusCount||0)>=3;
+  const isPrime = sc>=8 && (window._lastBonusCount||0)>=4;
   let liqZones=null;
   try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
   catch(e){ console.warn('LiqZones failed:',e); }
@@ -2656,7 +2656,7 @@ async function renderDetail(coin,klines,mtfData){
       ${needsReviewHtml}
       <!-- Long setup -->
       <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--green)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
-        ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/5 bonuses stacked</span></div>':''}
+        ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/7 bonuses stacked</span></div>':''}
         <div class="card-title" style="${isPrime?'color:#a78bfa':'color:var(--green)'};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
           <span>Long setup ${isLocked?'<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>':''}
           ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
@@ -2695,7 +2695,7 @@ async function renderDetail(coin,klines,mtfData){
 
       <!-- Short setup -->
       <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--red)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
-        ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/5 bonuses stacked</span></div>':''}
+        ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/7 bonuses stacked</span></div>':''}
         <div class="card-title" style="${isPrime?'color:#a78bfa':'color:var(--red)'};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
           <span>Short setup ${isLocked?'<span style="font-size:9px;background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.4);border-radius:3px;padding:2px 7px;margin-left:6px;font-family:var(--mono);letter-spacing:.06em">LOCKED</span>':''}
           ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
