@@ -638,7 +638,6 @@ function loadSwingSignals(){
         swingSignals[k]=sig;
       }
     });
-    console.log('Loaded swing signals:', Object.keys(swingSignals));
   } catch(e){ console.warn('Could not load swing signals:', e); swingSignals={}; }
 }
 
@@ -704,7 +703,6 @@ function lockSignal(coin, tf, ta, setup, sc, price, pivots, liqZones){
     }
   };
   saveSwingSignals();
-  console.log(`Signal locked: ${key} @ $${price}, score ${sc}`);
 }
 
 function updateSignalAI(coin, tf, ai){
@@ -722,7 +720,6 @@ function updateSignalAI(coin, tf, ai){
 function invalidateSignal(coin, tf, reason){
   const key = coin+'_'+tf;
   if(!swingSignals[key]) return;
-  console.log(`Signal invalidated: ${key} — ${reason}`);
   delete swingSignals[key];
   saveSwingSignals();
 }
@@ -766,26 +763,7 @@ function checkCVDFlip(sig, cvdData) {
   return prev === 'bearish' && curr === 'bullish';
 }
 
-// OI delta % since signal locked
-function getOIDelta(sig, currentOINotional) {
-  const locked = sig.snapshot.oiAtLock;
-  if (!locked || locked === 0) return 0;
-  return ((currentOINotional - locked) / locked) * 100;
-}
-
-// Calculate confluence score 0-4
-function calcConfluenceScore(sig, klines, cvdData, currentOINotional) {
-  let score = 0;
-  if (detectWickSweep(sig, klines))                    score++;
-  if (getVolumeMultiple(klines) >= 2.5)                score++;
-  if (checkCVDFlip(sig, cvdData))                      score++;
-  if (Math.abs(getOIDelta(sig, currentOINotional)) > 3) score++;
-  return score;
-}
-
 // Spawn a secondary "Sweep Opportunity" signal linked to the primary
-
-// Run Phase 2 re-eval on a signal after every render
 
 // Returns the locked signal if valid, null if should recalculate
 function checkSignalValidity(coin, tf, currentPrice, currentScore){
@@ -915,7 +893,6 @@ async function fetchMarket(){
   } catch(e) {}
 }
 
-
 async function fetchKlines(coin,tf){
   const key=coin+'_'+tf;
   if(klCache[key])return klCache[key];
@@ -943,13 +920,6 @@ async function fetchKlines(coin,tf){
   });
   klCache[key]=klines;return klines;
 }
-
-
-
-
-
-
-
 
 // ── Pivot swing high/low detection ──────────────────────────────────────────
 // strength=3 means candle must be highest/lowest in a 7-candle window around it
@@ -1440,7 +1410,6 @@ function renderLiqScaleInCard(coin, tf, price, ta, klines, cvdData, dec, liqZone
   }
 }
 
-
 function calcCVDFromKlines(klines) {
   const empty = { source:'kline', deltas:[], cvd:[], divergence:null, trend:'neutral',
     cvdValue:0, cvdChange:0, buyPct:'--', sellPct:'--', tradeCount:0, timeSpanMin:0 };
@@ -1809,49 +1778,39 @@ function scoreSignal(coin,ta,mtf,klines){
   }
   s+=vwapPts; breakdown.vwap=vwapPts;
 
-  // 14. OI DELTA DIRECTION — bonus signal 6
-  // Uses real OI history from Bybit endpoint (stored in window._lastOIHistory by renderDetail)
-  // Fires when OI is expanding = new money entering the market, confirming the move
-  // Contracting OI = short covering or long liquidation = weak move, bonus stays off
+  // 14. OI DELTA — bonus 6 (direction-aware, closed candles only)
   var oiDeltaPts = 0;
-  if (confirmedKlines) { // consistent with other bonuses — only on closed candles
+  if (confirmedKlines) {
     var _oiHist = window._lastOIHistory;
-    var _oidResult = calcOIDelta(_oiHist, ta.trend); // ta.trend = current TF direction, not 24h
+    var _oidResult = calcOIDelta(_oiHist, ta.trend);
     window._lastOIDelta = _oidResult;
-    // Bonus only fires when OI expansion aligns with signal direction
     if ((_oidResult.bullishConfirm && sigIsLong) || (_oidResult.bearishConfirm && sigIsShort)) oiDeltaPts = 1;
   }
   s += oiDeltaPts; breakdown.oiDelta = oiDeltaPts;
 
-  // 15. FUNDING DELTA DIRECTION — bonus signal 7
-  // +1 when funding flip or acceleration aligns with signal direction
-  // Extreme funding opposite to signal = danger → no bonus
+  // 15. FUNDING DELTA — bonus 7 (+1 when flip/acceleration aligns with signal direction)
   var fundingDeltaPts = 0;
   var _fd = window._lastFundingDelta;
   if (_fd) {
     var sigIsLong7  = signalDir === 'long';
     var sigIsShort7 = signalDir === 'short';
-    // Extreme opposite to signal = danger, skip bonus entirely
     var extremeOpposite = _fd.extreme && (
       (sigIsLong7  && _fd.direction === 'bearish') ||
       (sigIsShort7 && _fd.direction === 'bullish')
     );
     if (!extremeOpposite) {
-      // Flip aligned with signal
-      if (_fd.flipping && _fd.direction === 'bullish' && sigIsLong7)  fundingDeltaPts = 1;
-      if (_fd.flipping && _fd.direction === 'bearish' && sigIsShort7) fundingDeltaPts = 1;
-      // Acceleration aligned with signal
+      if (_fd.flipping    && _fd.direction === 'bullish' && sigIsLong7)  fundingDeltaPts = 1;
+      if (_fd.flipping    && _fd.direction === 'bearish' && sigIsShort7) fundingDeltaPts = 1;
       if (_fd.accelerating && _fd.direction === 'bullish' && sigIsLong7)  fundingDeltaPts = 1;
       if (_fd.accelerating && _fd.direction === 'bearish' && sigIsShort7) fundingDeltaPts = 1;
     }
   }
   s += fundingDeltaPts; breakdown.fundingDelta = fundingDeltaPts;
 
-  // OI spike penalty (existing — do not remove)
+  // OI spike penalty
   var oiM=sym?calcOIMomentum(sym):null;
   if(oiM&&oiM.spike){ s=Math.max(0,s-1); breakdown.oiPenalty=-1; }
 
-  // Track bonus count for Prime Setup detection
   window._lastBonusCount=[pocPts,bbPts,rsiDivPts,bosPts,vwapPts,oiDeltaPts,fundingDeltaPts].filter(function(x){return x>0;}).length;
 
   var final=Math.min(10,Math.max(0,Math.round(s)));
@@ -1966,7 +1925,6 @@ function getLeverageSuitability(entry, stop, selectedLev) {
   else { rating = 'Dangerous'; color = 'var(--red)'; emoji = '⛔'; }
   return { maxSafe, stopDist, isOk, rating, color, emoji };
 }
-
 
 // ── CVD mini-chart — delta bars (bottom 40%) + cumulative line (top 55%) ─────
 function buildCVDChart(klines, cvdData) {
@@ -2362,7 +2320,6 @@ function calcMTFAnalysis(mtfKlines) {
     filterTA, entryTA, stack
   };
 }
-
 
 function renderMTFCard(mtf, dec) {
   if (!mtf) return '<div class="mtf-card"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">MTF data loading...</div></div>';
@@ -2879,7 +2836,6 @@ async function renderDetail(coin,klines,mtfData){
       if(lastFired !== String(candleTime)){
         sessionStorage.setItem(sweepKey, String(candleTime));
         sendSweepAlert(coin, sweep, ta, setup, dec);
-        console.log('Sweep alert fired:', coin, sweep.side, sweep.sweepLevel);
       }
     }
   }
@@ -2910,7 +2866,6 @@ function renderScanBody(){
     </tr>`;
   }).join('');
 }
-
 
 async function selectCoin(c){
   tradeLogView = false;
@@ -3116,7 +3071,6 @@ function connectBybitWS(symbols) {
   bybitWS = new WebSocket('wss://stream.bybit.com/v5/public/linear');
   bybitWS.onopen = function() {
     wsReconnectAttempts = 0;
-    console.log('Bybit WS connected');
     const args = [];
     symbols.forEach(s => { args.push('allLiquidation.'+s); args.push('tickers.'+s); });
     bybitWS.send(JSON.stringify({ op:'subscribe', args }));
@@ -3272,7 +3226,6 @@ async function init(){
   if (!SKIP_WS) {
     connectBybitWS(trackedSyms);
   } else {
-    console.log('iOS/mobile detected — skipping WebSocket, using polling');
     const wsEl = document.getElementById('ws-status');
     if(wsEl) wsEl.innerHTML = getWSStatusHTML();
   }
@@ -3302,7 +3255,6 @@ async function init(){
       new Promise(resolve=>setTimeout(()=>resolve('timeout'),fetchTimeout))
     ]);
     const source = await marketPromise;
-    console.log('Market data source:', source);
     try{
       const fg=await fetchWithTimeout('https://api.alternative.me/fng/?limit=1',4000);
       const val=parseInt(fg.data[0]?.value||50);
@@ -3719,7 +3671,6 @@ async function sendSweepAlert(coin, sweep, ta, setup, dec) {
       body: JSON.stringify(payload)
     });
     const result = await r.json();
-    console.log('Sweep alert sent:', result);
   } catch(e) { console.error('Sweep alert error:', e); }
 }
 
@@ -3732,13 +3683,11 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
     const patternReady = patternStage === 'confirmed' || patternStage === 'near breakout';
     const confOk       = patternConf === 'high' || (patternConf === 'medium' && sc >= 7);
     if (sc < 7 || !confOk || !patternReady) {
-      console.log('Alert skipped:', sc+'/10', patternConf, patternStage);
       return;
     }
 
     // Gate 2: swing mode only — scalp TF alerts are too noisy for TG
     if (activeMode !== 'swing') {
-      console.log('Alert skipped: scalp mode');
       return;
     }
 
@@ -3746,7 +3695,6 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
     const alertKey = coin + '_signal_alert';
     const candleTime = getCurrentCandleTime('1d'); // always use daily candle for dedup
     if (sessionStorage.getItem(alertKey) === String(candleTime)) {
-      console.log('Alert already sent this daily candle:', alertKey);
       return;
     }
     sessionStorage.setItem(alertKey, String(candleTime));
@@ -3809,7 +3757,6 @@ async function sendTelegramAlert(coin, ta, sc, setup, ai, d, dec) {
       body: JSON.stringify(payload)
     });
     const result = await r.json();
-    console.log('Alert result:', result);
   } catch(e) {
     console.error('Alert error:', e);
   }
