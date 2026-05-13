@@ -2476,8 +2476,16 @@ function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
     +'<div style="font-size:11px;font-family:var(--mono);color:'+actionCol+';text-align:right;max-width:58%;line-height:1.5">'+action+'</div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 20px">'
-    +working.slice(0,4).map(function(w){return '<div style="font-size:10px;color:var(--green);font-family:var(--mono);padding:1px 0">✅ '+w+'</div>';}).join('')
-    +missing.slice(0,3).map(function(m){return '<div style="font-size:10px;color:var(--text3);font-family:var(--mono);padding:1px 0">❌ '+m+'</div>';}).join('')
+    +(function(){
+      var rows='';
+      var w=working.slice(0,4), m=missing.slice(0,3);
+      var total=Math.max(w.length,m.length);
+      for(var i=0;i<total;i++){
+        rows+=w[i]?'<div style="font-size:10px;color:var(--green);font-family:var(--mono);padding:1px 0">✅ '+w[i]+'</div>':'<div></div>';
+        rows+=m[i]?'<div style="font-size:10px;color:var(--text3);font-family:var(--mono);padding:1px 0">❌ '+m[i]+'</div>':'<div></div>';
+      }
+      return rows;
+    })()
     +'</div>'
     +'</div>';
 }
