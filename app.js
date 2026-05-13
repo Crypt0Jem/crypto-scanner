@@ -2189,11 +2189,11 @@ async function fetchAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         poc:ta.poc, ema20:ta.ema20,
         optimalLongEntry:setup.lE, optimalShortEntry:setup.sE,
         entryMode, mode:activeMode,
-        // Leverage & risk — critical for stop placement
+        // Leverage & risk — calculated directly (setup.liqLong not available at render time)
         leverage: activeLev,
-        liqLong: setup.liqLong,
-        liqShort: setup.liqShort,
-        maxSafeStopPct: setup.maxStopPct,
+        liqLong:  setup.liqLong  || +(setup.lE*(1 - 1/activeLev + (activeLev>=100?0.005:0.004) + 0.0005)).toFixed(dec),
+        liqShort: setup.liqShort || +(setup.sE*(1 + 1/activeLev - (activeLev>=100?0.005:0.004) - 0.0005)).toFixed(dec),
+        maxSafeStopPct: setup.maxStopPct || +((1/activeLev - (activeLev>=100?0.005:0.004))*0.6*100).toFixed(3),
         longStopPct: setup.atrStopLongPct||setup.lRisk,
         shortStopPct: setup.atrStopShortPct||setup.sRisk,
         // Signal quality
