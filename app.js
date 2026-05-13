@@ -1816,9 +1816,10 @@ function scoreSignal(coin,ta,mtf,klines){
   var oiDeltaPts = 0;
   if (confirmedKlines) { // consistent with other bonuses — only on closed candles
     var _oiHist = window._lastOIHistory;
-    var _oidResult = calcOIDelta(_oiHist, d.change24h);
+    var _oidResult = calcOIDelta(_oiHist, ta.trend); // ta.trend = current TF direction, not 24h
     window._lastOIDelta = _oidResult;
-    if (_oidResult.aligned) oiDeltaPts = 1;
+    // Bonus only fires when OI expansion aligns with signal direction
+    if ((_oidResult.bullishConfirm && sigIsLong) || (_oidResult.bearishConfirm && sigIsShort)) oiDeltaPts = 1;
   }
   s += oiDeltaPts; breakdown.oiDelta = oiDeltaPts;
 
@@ -2463,7 +2464,10 @@ function renderBonusRow(ta, dec, klines){
       detail: ta.poc ? '$'+fn(ta.poc,dec) : '' },
     { label:'OI expanding',
       on: !!(oid.aligned),
-      sub: oid.expanding ? 'New money entering market' : (oid.changePct < 0 ? 'OI contracting' : 'OI flat'),
+      sub: oid.bullishConfirm ? 'New longs entering — bull confirmed'
+         : oid.bearishConfirm ? 'New shorts entering — bear confirmed'
+         : oid.expanding      ? 'Expanding (direction unclear)'
+         : oid.changePct < 0  ? 'OI contracting' : 'OI flat',
       detail: oid.changePct !== undefined ? (oid.changePct >= 0 ? '+' : '')+oid.changePct+'% over 5 periods' : '' },
     { label:'Funding flip',
       on: !!(_fd2.flipping || _fd2.accelerating),
@@ -2515,6 +2519,7 @@ async function renderDetail(coin,klines,mtfData){
   window._lastFundingDelta = calcFundingDelta(fundingHist); // Layer 3: read by scoreSignal + renderBonusRow
   const oiHistory   = IS_MOBILE ? [] : await fetchOIHistory(bybitSym);
   window._lastOIHistory = oiHistory; // read by scoreSignal for bonus 6
+  window._lastOIDelta = calcOIDelta(oiHistory, ta.trend); // pre-compute for panel display
   const oiMom       = calcOIMomentum(bybitSym);
   const sc=scoreSignal(coin,ta,mtfData,klines);
   const isPrime = sc>=8 && (window._lastBonusCount||0)>=3;
@@ -3066,23 +3071,23 @@ async function fetchOIHistory(bybitSym) {
 
 // Layer 2 — compare first vs last OI value, classify vs price move direction
 // priceChange: positive = price rising, negative = price falling
-function calcOIDelta(oiHistory, priceChange) {
+function calcOIDelta(oiHistory, priceTrend) {
   if (!oiHistory || oiHistory.length < 2) {
-    return { expanding: false, aligned: false, changePct: 0 };
+    return { expanding: false, bullishConfirm: false, bearishConfirm: false, aligned: false, changePct: 0 };
   }
   const oldest    = oiHistory[0].oi;
   const latest    = oiHistory[oiHistory.length - 1].oi;
   const changePct = oldest > 0 ? ((latest - oldest) / oldest * 100) : 0;
-  const expanding = changePct > 0.3;   // OI growing meaningfully
-  // Aligned = OI expanding AND in same direction as price
-  const priceUp  = priceChange >= 0;
-  const aligned  = expanding && (
-    (priceUp)   ||   // price up + OI up = new longs entering
-    (!priceUp)       // price down + OI up = new shorts entering
-  );
-  // More precisely: expanding always aligns since new money is entering regardless of direction
-  // The anti-pattern is contracting OI with price move (short covering / long liq = weak)
-  return { expanding, aligned: expanding, changePct: +changePct.toFixed(2) };
+  const expanding = changePct > 0.3;
+  const priceUp   = priceTrend === 'bullish'      || priceTrend === 'mild-bullish';
+  const priceDown = priceTrend === 'bearish'      || priceTrend === 'mild-bearish';
+
+  // Direction-aware: new longs entering vs new shorts entering are different signals
+  const bullishConfirm = expanding && priceUp;   // price up + OI up = new longs = bullish
+  const bearishConfirm = expanding && priceDown; // price down + OI up = new shorts = bearish
+  const aligned        = bullishConfirm || bearishConfirm;
+
+  return { expanding, bullishConfirm, bearishConfirm, aligned, changePct: +changePct.toFixed(2) };
 }
 
 // Track OI across refreshes (rolling 3-point window per symbol)
