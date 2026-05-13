@@ -1740,7 +1740,7 @@ function scoreSignal(coin,ta,mtf,klines){
     var pocDist=Math.abs(d.price-ta.poc)/d.price*100;
     if(pocDist<=0.3)pocPts=1; // within 0.3% of POC = key decision level
   }
-  s+=pocPts; breakdown.poc=pocPts;
+  breakdown.poc=pocPts;
 
   // 10. BB SQUEEZE — bands tightest in 20 candles, breakout in trend direction (requires klines)
   var bbPts=0;
@@ -1749,7 +1749,7 @@ function scoreSignal(coin,ta,mtf,klines){
     if(bbResult.squeeze&&bbResult.breakoutAligned)bbPts=1;
     window._lastBBResult=bbResult;
   }
-  s+=bbPts; breakdown.bb=bbPts;
+  breakdown.bb=bbPts;
 
   // 11. RSI DIVERGENCE — price vs RSI disagree on direction (requires klines)
   var rsiDivPts=0;
@@ -1758,7 +1758,7 @@ function scoreSignal(coin,ta,mtf,klines){
     if(rsiDivResult.divergence)rsiDivPts=1;
     window._lastRSIDiv=rsiDivResult;
   }
-  s+=rsiDivPts; breakdown.rsiDiv=rsiDivPts;
+  breakdown.rsiDiv=rsiDivPts;
 
   // 12. BREAK OF STRUCTURE — price closes beyond last swing high/low in trend direction
   var bosPts=0;
@@ -1767,7 +1767,7 @@ function scoreSignal(coin,ta,mtf,klines){
     if(bosResult.bos)bosPts=1;
     window._lastBOS=bosResult;
   }
-  s+=bosPts; breakdown.bos=bosPts;
+  breakdown.bos=bosPts;
 
   // 13. VWAP RECLAIM — price crossing back above/below VWAP in trade direction
   var vwapPts=0;
@@ -1776,7 +1776,7 @@ function scoreSignal(coin,ta,mtf,klines){
     if(vwapResult.reclaim)vwapPts=1;
     window._lastVWAP=vwapResult;
   }
-  s+=vwapPts; breakdown.vwap=vwapPts;
+  breakdown.vwap=vwapPts;
 
   // 14. OI DELTA — bonus 6 (direction-aware, closed candles only)
   var oiDeltaPts = 0;
@@ -1786,7 +1786,7 @@ function scoreSignal(coin,ta,mtf,klines){
     window._lastOIDelta = _oidResult;
     if ((_oidResult.bullishConfirm && sigIsLong) || (_oidResult.bearishConfirm && sigIsShort)) oiDeltaPts = 1;
   }
-  s += oiDeltaPts; breakdown.oiDelta = oiDeltaPts;
+  breakdown.oiDelta = oiDeltaPts;
 
   // 15. FUNDING DELTA — bonus 7 (+1 when flip/acceleration aligns with signal direction)
   var fundingDeltaPts = 0;
@@ -1805,7 +1805,12 @@ function scoreSignal(coin,ta,mtf,klines){
       if (_fd.accelerating && _fd.direction === 'bearish' && sigIsShort7) fundingDeltaPts = 1;
     }
   }
-  s += fundingDeltaPts; breakdown.fundingDelta = fundingDeltaPts;
+  breakdown.fundingDelta = fundingDeltaPts;
+
+  // Apply bonuses with cap — core signals dominate, bonuses can add max 3pts
+  var bonusRaw = pocPts+bbPts+rsiDivPts+bosPts+vwapPts+oiDeltaPts+fundingDeltaPts;
+  var bonusCapped = Math.min(bonusRaw, 3);
+  s += bonusCapped; breakdown.bonusTotal = bonusRaw; breakdown.bonusCapped = bonusCapped;
 
   // OI spike penalty
   var oiM=sym?calcOIMomentum(sym):null;
