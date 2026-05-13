@@ -2158,49 +2158,103 @@ async function fetchAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
   const key=coin+'_'+activeTF+'_'+entryMode;
   if(aiCache[key])return aiCache[key];
   const d=mktData[coin];
+  const dec=COINS[coin].dec;
+  const bd=window._lastScoreBreakdown||{};
+  const sum=window._lastSummaryData||{};
   try{
     const res=await fetch('/api/analyze',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        coin,tf:activeTF,price:d.price,change24h:d.change24h,
-        rsi:ta.rsi.toFixed(1),trend:ta.trend,
-        funding:d.funding.toFixed(4),fgValue:d.fgValue,
-        atr:ta.atr.toFixed(COINS[coin].dec>2?2:COINS[coin].dec),
+        // Core market data
+        coin, tf:activeTF, price:d.price, change24h:d.change24h,
+        high24h:d.high24h, low24h:d.low24h, volume24h:d.volume24h,
+        rsi:ta.rsi.toFixed(1), trend:ta.trend,
+        funding:d.funding.toFixed(4), fgValue:d.fgValue,
+        atr:ta.atr.toFixed(dec>2?2:dec),
         oi:(d.oiNotional/1e9).toFixed(2),
-        support:ta.support,resistance:ta.resistance,
-        optimalLongEntry:setup.lE,optimalShortEntry:setup.sE,
-        entryMode,
-        mode: activeMode,
+        support:ta.support, resistance:ta.resistance,
+        poc:ta.poc, ema20:ta.ema20,
+        optimalLongEntry:setup.lE, optimalShortEntry:setup.sE,
+        entryMode, mode:activeMode,
+        // Leverage & risk — critical for stop placement
+        leverage: activeLev,
+        liqLong: setup.liqLong,
+        liqShort: setup.liqShort,
+        maxSafeStopPct: setup.maxStopPct,
+        longStopPct: setup.atrStopLongPct||setup.lRisk,
+        shortStopPct: setup.atrStopShortPct||setup.sRisk,
+        // Signal quality
+        signalDir: window._lastSignalDir||'neutral',
+        score: sc,
+        scoreBreakdown: {
+          liq:bd.liq||0, cvd:bd.cvd||0, mtf:bd.mtf||0,
+          vol:bd.vol||0, taker:bd.taker||0, session:bd.session||0,
+          rsi:bd.rsi||0, ob:bd.ob||0,
+          bonusRaw:bd.bonusTotal||0, bonusCapped:bd.bonusCapped||0
+        },
+        bonusCount: window._lastBonusCount||0,
+        bonusSignals: {
+          bbSqueeze:  !!(window._lastBBResult?.squeeze&&window._lastBBResult?.breakoutAligned),
+          vwapReclaim:!!(window._lastVWAP?.reclaim),
+          bos:        !!(window._lastBOS?.bos),
+          bosType:    window._lastBOS?.type||null,
+          rsiDiv:     !!(window._lastRSIDiv?.divergence),
+          rsiDivLabel:window._lastRSIDiv?.label||null,
+          poc:        (bd.poc||0)>0,
+          oiDelta:    !!(window._lastOIDelta?.aligned),
+          fundingFlip:!!(window._lastFundingDelta?.flipping||window._lastFundingDelta?.accelerating)
+        },
+        // OI & funding momentum
+        oiDelta: window._lastOIDelta||null,
+        fundingDelta: window._lastFundingDelta||null,
+        oiMomentum: {
+          trend:(window._oiMomCache||{}).trend||'unknown',
+          changePct:(window._oiMomCache||{}).changePct||0,
+          spike:(window._oiMomCache||{}).spike||false
+        },
+        // Summary card pre-digested context
+        summaryCard: {
+          status: sum.action||'Unknown',
+          direction: sum.dirLabel||'NEUTRAL',
+          working: sum.working||[],
+          missing: sum.missing||[],
+          waitLevel: sum.waitLevel||null,
+          atKeyLevel: sum.atKeyLevel||null
+        },
+        // MTF, CVD, liq zones, candles
         liqZones: liqZones ? {
-          fundingBias: liqZones.fundingBias,
-          majorLongCluster: liqZones.majorLongCluster.priceRange,
-          majorShortCluster: liqZones.majorShortCluster.priceRange,
-          nearestLongSweep: liqZones.nearestLongSweep.price,
-          nearestShortSweep: liqZones.nearestShortSweep.price,
-          topLongLiq: liqZones.topLongLiq.map(z=>z.price).join(', '),
-          topShortLiq: liqZones.topShortLiq.map(z=>z.price).join(', '),
-          longSweepEntry: liqZones.longSweepEntry,
-          shortSweepEntry: liqZones.shortSweepEntry
+          fundingBias:liqZones.fundingBias,
+          majorLongCluster:liqZones.majorLongCluster.priceRange,
+          majorShortCluster:liqZones.majorShortCluster.priceRange,
+          nearestLongSweep:liqZones.nearestLongSweep.price,
+          nearestShortSweep:liqZones.nearestShortSweep.price,
+          topLongLiq:liqZones.topLongLiq.map(z=>z.price).join(', '),
+          topShortLiq:liqZones.topShortLiq.map(z=>z.price).join(', '),
+          longSweepEntry:liqZones.longSweepEntry,
+          shortSweepEntry:liqZones.shortSweepEntry
         } : null,
         mtfSummary: mtfData ? {
-          confluenceLabel: mtfData.confluenceLabel,
-          confluenceScore: mtfData.confluenceScore,
-          filterStatus: mtfData.filterStatus,
-          filterMsg: mtfData.filterMsg,
-          positionSizeMultiplier: mtfData.positionSizeMultiplier,
-          trendByTF: mtfData.trendSummary,
-          labels: mtfData.stack.labels
+          confluenceLabel:mtfData.confluenceLabel,
+          confluenceScore:mtfData.confluenceScore,
+          filterStatus:mtfData.filterStatus,
+          filterMsg:mtfData.filterMsg,
+          positionSizeMultiplier:mtfData.positionSizeMultiplier,
+          trendByTF:mtfData.trendSummary,
+          labels:mtfData.stack.labels
         } : null,
         cvdSummary: cvdData ? {
-          trend: cvdData.trend,
-          divergence: cvdData.divergence ? cvdData.divergence.label : null,
-          divergenceDesc: cvdData.divergence ? cvdData.divergence.desc : null,
-          divergenceType: cvdData.divergence ? cvdData.divergence.type : null,
-          cvdDirection: cvdData.cvdChange > 0 ? 'rising' : 'falling',
-          recentBias: cvdData.cvdChange > 0 ? 'net buying pressure' : 'net selling pressure'
+          trend:cvdData.trend,
+          divergence:cvdData.divergence?cvdData.divergence.label:null,
+          divergenceDesc:cvdData.divergence?cvdData.divergence.desc:null,
+          divergenceType:cvdData.divergence?cvdData.divergence.type:null,
+          cvdDirection:cvdData.cvdChange>0?'rising':'falling',
+          recentBias:cvdData.cvdChange>0?'net buying pressure':'net selling pressure'
         } : null,
-        candles:klines.slice(-50).map(k=>({o:+k.o.toFixed(COINS[coin].dec),h:+k.h.toFixed(COINS[coin].dec),l:+k.l.toFixed(COINS[coin].dec),c:+k.c.toFixed(COINS[coin].dec),v:Math.round(k.v)}))
+        candles:klines.slice(-50).map(k=>({
+          o:+k.o.toFixed(dec),h:+k.h.toFixed(dec),
+          l:+k.l.toFixed(dec),c:+k.c.toFixed(dec),v:Math.round(k.v)
+        }))
       })
     });
     if(!res.ok)throw new Error('API '+res.status);
@@ -2468,6 +2522,15 @@ function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
 
   var dirLabel = sc<5?'NEUTRAL':isLong?'LONG':'SHORT';
   var dirCol   = sc<5?'var(--text3)':isLong?'var(--green)':'var(--red)';
+
+  // Store for fetchAI to read
+  window._lastSummaryData = {
+    action, dirLabel, signalDir,
+    working: working.slice(0,4),
+    missing: missing.slice(0,3),
+    waitLevel: waitLevel ? {label: waitLevel.label, val: waitLevel.val} : null,
+    atKeyLevel: atKeyLevel ? {label: atKeyLevel.label, val: atKeyLevel.val} : null
+  };
 
   return '<div class="card full" style="background:'+actionBg+';border-left:3px solid '+actionCol+';margin-bottom:4px">'
     +'<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
@@ -4075,12 +4138,35 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
     const posNote = ai.positionSizeNote
       ? `<div style="background:rgba(245,166,35,.08);border:1px solid var(--amber-b);border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);font-family:var(--mono)">💰 Position size: ${ai.positionSizeNote}</div>`
       : '';
+
+    // Entry decision card (new)
+    const ed = ai.entryDecision || {};
+    const edCol = ed.action==='ENTER_NOW'?'var(--green)':ed.action==='AVOID'?'var(--red)':'var(--amber)';
+    const edBg  = ed.action==='ENTER_NOW'?'rgba(0,208,132,0.07)':ed.action==='AVOID'?'rgba(255,77,77,0.07)':'rgba(245,166,35,0.07)';
+    const edIcon = ed.action==='ENTER_NOW'?'⚡':ed.action==='AVOID'?'❌':'👁';
+    const decCard = ed.action ? `
+      <div style="background:${edBg};border:1px solid ${edCol};border-radius:8px;padding:12px 16px;margin-bottom:12px">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);margin-bottom:6px">AI Entry Decision</div>
+        <div style="font-size:13px;font-weight:700;color:${edCol};font-family:var(--mono);margin-bottom:8px">${edIcon} ${ed.action.replace('_',' ')} — ${(ed.direction||'').toUpperCase()}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:10px;font-family:var(--mono)">
+          <div><span style="color:var(--text3)">Entry </span><span style="color:var(--text1);font-weight:600">$${ed.entryPrice||'—'}</span></div>
+          <div><span style="color:var(--text3)">Stop </span><span style="color:var(--red);font-weight:600">$${ed.stopLoss||'—'}</span></div>
+          <div><span style="color:var(--text3)">TP1 </span><span style="color:var(--green);font-weight:600">$${ed.tp1||'—'}</span></div>
+          <div><span style="color:var(--text3)">TP2 </span><span style="color:var(--green);font-weight:600">$${ed.tp2||'—'}</span></div>
+          <div><span style="color:var(--text3)">R:R </span><span style="color:var(--text1)">${ed.riskReward||'—'}</span></div>
+          <div><span style="color:var(--text3)">Leverage </span><span style="color:var(--amber)">${ed.leverageNote||'—'}</span></div>
+        </div>
+        ${ed.entryTrigger?`<div style="margin-top:8px;font-size:10px;color:var(--text2);font-family:var(--mono);border-top:1px solid rgba(255,255,255,.08);padding-top:8px">⏳ ${ed.entryTrigger}</div>`:''}
+        ${ed.stopRationale?`<div style="margin-top:4px;font-size:10px;color:var(--text3);font-family:var(--mono)">🛡 ${ed.stopRationale}</div>`:''}
+      </div>` : '';
+
     aiEl.innerHTML=`
       <div class="card-title" style="color:var(--blue)">AI analysis — Claude (${activeMode} mode)
         <span style="margin-left:10px;font-size:9px;color:${cCol}">CONVICTION: ${(ai.conviction||'').toUpperCase()}</span>
         <span style="margin-left:8px;font-size:9px;color:${bCol}">BIAS: ${(ai.bias||'').toUpperCase()}</span>
         ${ai.counterTrend ? '<span style="margin-left:8px;font-size:9px;background:rgba(255,77,77,.2);color:var(--red);padding:2px 6px;border-radius:3px">⛔ COUNTER-TREND</span>' : ''}
       </div>
+      ${decCard}
       ${counterWarn}
       ${mtfVerdict}
       <p class="ai-summary">${ai.summary||''}</p>
@@ -4091,7 +4177,7 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
       ${posNote}
       <div class="ai-risk">Key risk: ${ai.keyRisk||'—'}</div>
       <div class="ai-action">Suggested action: ${ai.suggestedAction||'—'}</div>
-      <div class="ai-pattern-hist">Historical pattern context: ${ai.historicalPattern||'—'}</div>
+      <div class="ai-pattern-hist">Historical context: ${ai.historicalPattern||'—'}</div>
     `;
   }
 
