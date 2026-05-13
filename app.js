@@ -2395,6 +2395,93 @@ function renderAlerts(scores){
   el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('')+'</div>';
 }
 
+function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
+  var bd  = window._lastScoreBreakdown || {};
+  var isLong  = signalDir === 'long';
+  var fn2 = function(n){ return n?Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
+
+  // Key level proximity — within 0.5% counts as "at level"
+  var levels = [
+    {label:'support',    val:ta.support},
+    {label:'resistance', val:ta.resistance},
+    {label:'POC',        val:ta.poc},
+    {label:'EMA 20',     val:ta.ema20},
+  ].filter(function(l){return l.val>0;});
+
+  var atKeyLevel = null;
+  var waitLevel  = null;
+  levels.forEach(function(lv){
+    if(Math.abs(d.price-lv.val)/d.price*100 <= 0.5 && !atKeyLevel) atKeyLevel = lv;
+  });
+  if(!atKeyLevel){
+    var candidates = isLong
+      ? levels.filter(function(l){return l.val<d.price;}).sort(function(a,b){return b.val-a.val;})
+      : levels.filter(function(l){return l.val>d.price;}).sort(function(a,b){return a.val-b.val;});
+    waitLevel = candidates[0] || null;
+  }
+
+  // What's working (plain English, max 4)
+  var bos=window._lastBOS||{}, vw=window._lastVWAP||{}, oid=window._lastOIDelta||{};
+  var fd=window._lastFundingDelta||{}, rd=window._lastRSIDiv||{}, bb=window._lastBBResult||{};
+  var working=[];
+  if((bd.cvd||0)>=2)                        working.push('Order flow confirms direction');
+  if((bd.mtf||0)>=2)                        working.push('Higher timeframes aligned');
+  if((bd.liq||0)>=2)                        working.push('Near liquidation cluster');
+  if((bd.vol||0)>=2)                        working.push('Strong volume spike');
+  if(bos.bos)                               working.push('Price broke key structure');
+  if(vw.reclaim)                            working.push('VWAP reclaimed');
+  if(oid.aligned)                           working.push('New money entering market');
+  if(fd.flipping||fd.accelerating)          working.push('Funding momentum aligned');
+  if(rd.divergence)                         working.push('RSI divergence present');
+  if(bb.squeeze&&bb.breakoutAligned)        working.push('Squeeze breakout aligned');
+  if(atKeyLevel) working.push('At key level — $'+fn2(atKeyLevel.val)+' ('+atKeyLevel.label+')');
+
+  // What's missing (plain English, max 3)
+  var missing=[];
+  if(!atKeyLevel)           missing.push('Price not at ideal entry yet');
+  if((bd.cvd||0)<1)         missing.push('Order flow not confirming');
+  if(!bos.bos)              missing.push('No structure break yet');
+  if((bd.vol||0)<1)         missing.push('Volume not confirmed');
+  if((bd.mtf||0)<1)         missing.push('Higher timeframes conflicted');
+
+  // Action + colour
+  var action, actionCol, actionBg;
+  if(sc>=8&&isPrime&&atKeyLevel){
+    action='🔥 Prime entry — all conditions met';
+    actionCol='#a78bfa'; actionBg='rgba(167,139,250,0.10)';
+  } else if(sc>=7&&atKeyLevel){
+    action='⚡ Enter on next closed candle';
+    actionCol='var(--green)'; actionBg='rgba(0,208,132,0.07)';
+  } else if(sc>=7&&waitLevel){
+    action='👁 Good setup — wait for $'+fn2(waitLevel.val)+' ('+waitLevel.label+')';
+    actionCol='var(--amber)'; actionBg='rgba(245,166,35,0.07)';
+  } else if(sc>=5&&waitLevel){
+    action='⌛ Setup forming — watch $'+fn2(waitLevel.val)+' ('+waitLevel.label+')';
+    actionCol='var(--amber)'; actionBg='rgba(245,166,35,0.05)';
+  } else if(sc>=5){
+    action='⌛ Setup forming — no clean entry yet';
+    actionCol='var(--amber)'; actionBg='rgba(245,166,35,0.05)';
+  } else {
+    action='❌ No setup — stay out';
+    actionCol='var(--red)'; actionBg='rgba(255,77,77,0.05)';
+  }
+
+  var dirLabel = sc<5?'NEUTRAL':isLong?'LONG':'SHORT';
+  var dirCol   = sc<5?'var(--text3)':isLong?'var(--green)':'var(--red)';
+
+  return '<div class="card full" style="background:'+actionBg+';border-left:3px solid '+actionCol+';margin-bottom:4px">'
+    +'<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+    +'<div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);margin-bottom:3px">Trade summary</div>'
+    +'<div style="font-size:15px;font-weight:700;color:'+dirCol+';font-family:var(--mono)">'+dirLabel+' <span style="color:var(--text2);font-weight:400;font-size:12px">'+sc+'/10</span></div></div>'
+    +'<div style="font-size:11px;font-family:var(--mono);color:'+actionCol+';text-align:right;max-width:58%;line-height:1.5">'+action+'</div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 20px">'
+    +working.slice(0,4).map(function(w){return '<div style="font-size:10px;color:var(--green);font-family:var(--mono);padding:1px 0">✅ '+w+'</div>';}).join('')
+    +missing.slice(0,3).map(function(m){return '<div style="font-size:10px;color:var(--text3);font-family:var(--mono);padding:1px 0">❌ '+m+'</div>';}).join('')
+    +'</div>'
+    +'</div>';
+}
+
 function renderBonusRow(ta, dec, klines){
   var bb  = window._lastBBResult        || {};
   var bos = window._lastBOS             || {};
@@ -2659,6 +2746,8 @@ async function renderDetail(coin,klines,mtfData){
       <!-- Phase 2: sweep opportunity + review banner (pre-computed above) -->
       ${sweepCardHtml}
       ${needsReviewHtml}
+      <!-- Trade Summary Card -->
+      ${renderSummaryCard(sc, ta, d, dec, isPrime, window._lastSignalDir||'long')}
       <!-- Long setup -->
       <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--green)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/7 bonuses stacked</span></div>':''}
