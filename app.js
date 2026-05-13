@@ -1822,12 +1822,36 @@ function scoreSignal(coin,ta,mtf,klines){
   }
   s += oiDeltaPts; breakdown.oiDelta = oiDeltaPts;
 
+  // 15. FUNDING DELTA DIRECTION — bonus signal 7
+  // +1 when funding flip or acceleration aligns with signal direction
+  // Extreme funding opposite to signal = danger → no bonus
+  var fundingDeltaPts = 0;
+  var _fd = window._lastFundingDelta;
+  if (_fd) {
+    var sigIsLong7  = signalDir === 'long';
+    var sigIsShort7 = signalDir === 'short';
+    // Extreme opposite to signal = danger, skip bonus entirely
+    var extremeOpposite = _fd.extreme && (
+      (sigIsLong7  && _fd.direction === 'bearish') ||
+      (sigIsShort7 && _fd.direction === 'bullish')
+    );
+    if (!extremeOpposite) {
+      // Flip aligned with signal
+      if (_fd.flipping && _fd.direction === 'bullish' && sigIsLong7)  fundingDeltaPts = 1;
+      if (_fd.flipping && _fd.direction === 'bearish' && sigIsShort7) fundingDeltaPts = 1;
+      // Acceleration aligned with signal
+      if (_fd.accelerating && _fd.direction === 'bullish' && sigIsLong7)  fundingDeltaPts = 1;
+      if (_fd.accelerating && _fd.direction === 'bearish' && sigIsShort7) fundingDeltaPts = 1;
+    }
+  }
+  s += fundingDeltaPts; breakdown.fundingDelta = fundingDeltaPts;
+
   // OI spike penalty (existing — do not remove)
   var oiM=sym?calcOIMomentum(sym):null;
   if(oiM&&oiM.spike){ s=Math.max(0,s-1); breakdown.oiPenalty=-1; }
 
   // Track bonus count for Prime Setup detection
-  window._lastBonusCount=[pocPts,bbPts,rsiDivPts,bosPts,vwapPts,oiDeltaPts].filter(function(x){return x>0;}).length;
+  window._lastBonusCount=[pocPts,bbPts,rsiDivPts,bosPts,vwapPts,oiDeltaPts,fundingDeltaPts].filter(function(x){return x>0;}).length;
 
   var final=Math.min(10,Math.max(0,Math.round(s)));
   window._lastScoreBreakdown=breakdown; // store for display
@@ -2415,6 +2439,7 @@ function renderBonusRow(ta, dec, klines){
   var rd  = window._lastRSIDiv          || {};
   var bd  = window._lastScoreBreakdown  || {};
   var oid = window._lastOIDelta         || {};
+  var _fd2= window._lastFundingDelta    || {};
   var bonuses = [
     { label:'BB squeeze',
       on: !!(bb.squeeze && bb.breakoutAligned),
@@ -2439,7 +2464,13 @@ function renderBonusRow(ta, dec, klines){
     { label:'OI expanding',
       on: !!(oid.aligned),
       sub: oid.expanding ? 'New money entering market' : (oid.changePct < 0 ? 'OI contracting' : 'OI flat'),
-      detail: oid.changePct !== undefined ? (oid.changePct >= 0 ? '+' : '')+oid.changePct+'% over 5 periods' : '' }
+      detail: oid.changePct !== undefined ? (oid.changePct >= 0 ? '+' : '')+oid.changePct+'% over 5 periods' : '' },
+    { label:'Funding flip',
+      on: !!(_fd2.flipping || _fd2.accelerating),
+      sub: _fd2.flipping     ? (_fd2.direction==='bullish' ? 'Flipped bullish ⚡' : 'Flipped bearish ⚡')
+         : _fd2.accelerating ? (_fd2.direction==='bullish' ? 'Accelerating bullish' : 'Accelerating bearish')
+         : (_fd2.direction==='bullish' ? 'Positive — stable' : _fd2.direction==='bearish' ? 'Negative — stable' : 'Neutral'),
+      detail: _fd2.latest !== undefined ? 'Latest: '+(_fd2.latest >= 0 ? '+' : '')+(_fd2.latest*1).toFixed(4)+'%' : '' }
   ];
   var active = bonuses.filter(function(b){return b.on;}).length;
   var hdrCol = active>=3?'var(--purple)':active>=1?'var(--green)':'var(--text3)';
@@ -2464,7 +2495,7 @@ function renderBonusRow(ta, dec, klines){
     : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">✓ Closed candle</span>';
   return '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">'
     +'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-    +'<span>Bonus confluence — '+active+'/6 active</span>'
+    +'<span>Bonus confluence — '+active+'/7 active</span>'
     +candleNote
     +(active>=3 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">🔥 Prime threshold met</span>' : '')
     +'</div>'
@@ -2481,6 +2512,7 @@ async function renderDetail(coin,klines,mtfData){
   const bybitSym = COINS[coin].sym;
   const fundingHist = IS_MOBILE ? [] : await fetchFundingHistory(bybitSym);
   const fundingMom  = calcFundingMomentum(fundingHist);
+  window._lastFundingDelta = calcFundingDelta(fundingHist); // Layer 3: read by scoreSignal + renderBonusRow
   const oiHistory   = IS_MOBILE ? [] : await fetchOIHistory(bybitSym);
   window._lastOIHistory = oiHistory; // read by scoreSignal for bonus 6
   const oiMom       = calcOIMomentum(bybitSym);
@@ -2979,6 +3011,39 @@ function calcFundingMomentum(history) {
   else if (direction === 'falling')   momentum = 'falling';
 
   return { momentum, direction, acceleration: +acceleration.toFixed(5), latest: c, flipped };
+}
+
+// Layer 3 — funding rate direction of change (the flip IS the signal)
+// fundingHistory: array of {rate, timestamp} oldest-first, rates in % (e.g. 0.01 = 0.01%)
+function calcFundingDelta(fundingHistory) {
+  if (!fundingHistory || fundingHistory.length < 3) {
+    return { flipping: false, direction: 'neutral', accelerating: false, extreme: false, latest: 0 };
+  }
+  const rates  = fundingHistory.map(function(h) { return h.rate; });
+  const len    = rates.length;
+  const latest = rates[len - 1];
+  const prev   = rates[len - 2];
+  const older  = rates[len - 3];
+
+  // Flip: funding crossed zero between previous and latest period
+  const flipping = (prev < 0 && latest > 0) || (prev > 0 && latest < 0);
+
+  // Direction of current funding (who is paying)
+  var direction = 'neutral';
+  if (latest >  0.001) direction = 'bullish'; // longs paying — bullish pressure
+  if (latest < -0.001) direction = 'bearish'; // shorts paying — bearish pressure
+
+  // Accelerating: consecutive moves in same direction AND getting stronger
+  const trend1 = prev   - older; // older change
+  const trend2 = latest - prev;  // recent change
+  const accelerating = !flipping &&
+    Math.sign(trend2) === Math.sign(trend1) &&
+    Math.abs(trend2) > 0;
+
+  // Extreme: >0.05% or <-0.05% — danger if opposite to your trade
+  const extreme = Math.abs(latest) > 0.05;
+
+  return { flipping, direction, accelerating, extreme, latest: +latest.toFixed(5) };
 }
 
 // Layer 2 — fetch 5 real OI data points from Bybit dedicated endpoint
