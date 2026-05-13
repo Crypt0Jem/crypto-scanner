@@ -56,10 +56,6 @@ function calculateSignalWeight(signalType) {
   return +Math.max(0.60, Math.min(1.40, 0.3 + 0.7 * bayesWR)).toFixed(3);
 }
 
-function applyLearningWeight(rawScore, signalType) {
-  var w = calculateSignalWeight(signalType || 'swing');
-  return +Math.min(10, Math.max(0, rawScore * w)).toFixed(1);
-}
 
 function getLearnedWeights() {
   var types  = ['swing','scalp','post_sweep','liq_scale','sweep_opp'];
@@ -726,22 +722,49 @@ function invalidateSignal(coin, tf, reason){
 
 // ── PHASE 2 HELPERS ─────────────────────────────────────────────────────────
 
+
+// Volume spike: wick candle volume vs median of last 20
+function applyLearningWeight(rawScore, signalType) {
+  var w = calculateSignalWeight(signalType || 'swing');
+  return +Math.min(10, Math.max(0, rawScore * w)).toFixed(1);
+}
+
 // Detect wick-based sweep (polling, no WS needed)
 // Long sweep: wick pierced invalidation level but candle closed back above
 // Short sweep: wick pierced resistance but candle closed back below
 function detectWickSweep(sig, klines) {
   if (!klines || klines.length < 2) return false;
-  const c = klines[klines.length - 1];  // current candle
+  const c = klines[klines.length - 1];
   const inv = sig.lockedSetup.invalidationLevel;
   const bias = sig.lockedSetup.bias;
-  if (bias === 'short') {
-    return c.h >= inv && c.c < inv;   // wick up through resistance, closed back below
-  }
-  // long or null
-  return c.l <= inv && c.c > inv;     // wick down through support, closed back above
+  if (bias === 'short') return c.h >= inv && c.c < inv;
+  return c.l <= inv && c.c > inv;
 }
 
-// Volume spike: wick candle volume vs median of last 20
+// CVD flip: current trend opposite to previous trend
+function checkCVDFlip(sig, cvdData) {
+  if (!cvdData || !cvdData.trend) return false;
+  const prev = sig.reEval.prevCVDTrend;
+  const curr = cvdData.trend;
+  const bias = sig.lockedSetup.bias;
+  if (bias === 'short') return prev === 'bullish' && curr === 'bearish';
+  return prev === 'bearish' && curr === 'bullish';
+}
+
+// Check if a real sweep occurred via liq queue
+function checkForRealSweep(sig, currentPrice) {
+  const bybitSym = (COINS[sig.symbol]||{}).sym||(sig.symbol+'USDT');
+  const isLong = sig.lockedSetup.bias !== 'bearish';
+  const level = isLong ? sig.lockedSetup.invalidationLevel : (sig.lockedSetup.resistance||currentPrice*1.02);
+  const atr = sig.lockedSetup.atr||currentPrice*0.02;
+  for (const ev of bybitLiqQueue) {
+    if (ev.symbol !== bybitSym) continue;
+    const hit = isLong ? ev.price<=level : ev.price>=level;
+    if (hit && Math.abs(ev.price-currentPrice)<atr*2) return {hit:true,price:ev.price,side:ev.side,qty:ev.qty,timestamp:ev.timestamp};
+  }
+  return {hit:false};
+}
+
 function getVolumeMultiple(klines) {
   if (!klines || klines.length < 21) return 1;
   const last20 = klines.slice(-21, -1).map(k => k.v).sort((a,b) => a - b);
@@ -750,18 +773,6 @@ function getVolumeMultiple(klines) {
   return current / median;
 }
 
-// CVD flip: current trend opposite to previous trend for 2 consecutive readings
-// Uses cvdData.trend from fetchCVDData — we store prev trend in reEval
-function checkCVDFlip(sig, cvdData) {
-  if (!cvdData || !cvdData.trend) return false;
-  const prev = sig.reEval.prevCVDTrend;
-  const curr = cvdData.trend;
-  const bias = sig.lockedSetup.bias;
-  // For a long sweep: we want CVD flipping FROM bearish TO bullish
-  // For a short sweep: CVD flipping FROM bullish TO bearish
-  if (bias === 'short') return prev === 'bullish' && curr === 'bearish';
-  return prev === 'bearish' && curr === 'bullish';
-}
 
 // Spawn a secondary "Sweep Opportunity" signal linked to the primary
 
@@ -1650,7 +1661,7 @@ function calcVWAPReclaim(klines,trend){
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function scoreSignal(coin,ta,mtf,klines){
+function scoreSignal(coin,ta,mtf,klines,forceDir){
   const d=mktData[coin];if(!d)return 0;
   var breakdown = {}; // track each factor for display
   var s=0;
@@ -1684,6 +1695,7 @@ function scoreSignal(coin,ta,mtf,klines){
     // CVD mild contradiction or neutral → 0, keep trend direction
   }
   s+=cvdPts; breakdown.cvd=cvdPts;
+  if(forceDir) signalDir = forceDir; // bidirectional scoring override
   window._lastSignalDir = signalDir; // store for verdictOf
 
   // 3. MTF CONFLUENCE (20% — prevents trend-fighting)
@@ -2187,6 +2199,8 @@ async function fetchAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
         // Signal quality
         signalDir: window._lastSignalDir||'neutral',
         score: sc,
+        scoreLong: scLong,
+        scoreShort: scShort,
         scoreBreakdown: {
           liq:bd.liq||0, cvd:bd.cvd||0, mtf:bd.mtf||0,
           vol:bd.vol||0, taker:bd.taker||0, session:bd.session||0,
@@ -2449,7 +2463,7 @@ function renderAlerts(scores){
   el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('')+'</div>';
 }
 
-function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
+function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir, scLong, scShort, setup) {
   var bd  = window._lastScoreBreakdown || {};
   var isLong  = signalDir === 'long';
   var fn2 = function(n){ return n?Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
@@ -2522,6 +2536,9 @@ function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
 
   var dirLabel = sc<5?'NEUTRAL':isLong?'LONG':'SHORT';
   var dirCol   = sc<5?'var(--text3)':isLong?'var(--green)':'var(--red)';
+  var bothScores = (scLong!==undefined&&scShort!==undefined)
+    ? ' <span style="font-size:10px;color:var(--text3);font-family:var(--mono);font-weight:400">(L:'+scLong+' S:'+scShort+')</span>'
+    : '';
 
   // Store for fetchAI to read
   window._lastSummaryData = {
@@ -2535,7 +2552,7 @@ function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
   return '<div class="card full" style="background:'+actionBg+';border-left:3px solid '+actionCol+';margin-bottom:4px">'
     +'<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
     +'<div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);margin-bottom:3px">Trade summary</div>'
-    +'<div style="font-size:15px;font-weight:700;color:'+dirCol+';font-family:var(--mono)">'+dirLabel+' <span style="color:var(--text2);font-weight:400;font-size:12px">'+sc+'/10</span></div></div>'
+    +'<div style="font-size:15px;font-weight:700;color:'+dirCol+';font-family:var(--mono)">'+dirLabel+' <span style="color:var(--text2);font-weight:400;font-size:12px">'+sc+'/10</span>'+bothScores+'</div></div>'
     +'<div style="font-size:11px;font-family:var(--mono);color:'+actionCol+';text-align:right;max-width:58%;line-height:1.5">'+action+'</div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 20px">'
@@ -2550,6 +2567,20 @@ function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir) {
       return rows;
     })()
     +'</div>'
+    +(function(){
+      if(!setup||sc<5) return '';
+      var e  = isLong ? setup.lE   : setup.sE;
+      var sl = isLong ? setup.lSL  : setup.sSL;
+      var t1 = isLong ? setup.lTP1 : setup.sTP1;
+      var rr = (e&&sl&&t1) ? (Math.abs(t1-e)/Math.abs(e-sl)).toFixed(1)+'R' : '—';
+      var px = function(n){ return n?'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
+      return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap">'
+        +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">Entry </span><span style="color:var(--text1);font-weight:600">'+px(e)+'</span></div>'
+        +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">Stop </span><span style="color:var(--red);font-weight:600">'+px(sl)+'</span></div>'
+        +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">TP1 </span><span style="color:var(--green);font-weight:600">'+px(t1)+'</span></div>'
+        +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">R:R </span><span style="color:var(--text2)">'+rr+'</span></div>'
+        +'</div>';
+    })()
     +'</div>';
 }
 
@@ -2641,7 +2672,12 @@ async function renderDetail(coin,klines,mtfData){
   window._lastOIHistory = oiHistory; // read by scoreSignal for bonus 6
   window._lastOIDelta = calcOIDelta(oiHistory, ta.trend); // pre-compute for panel display
   const oiMom       = calcOIMomentum(bybitSym);
-  const sc=scoreSignal(coin,ta,mtfData,klines);
+  // Score both directions independently — use whichever is higher as primary
+  const scLong  = scoreSignal(coin,ta,mtfData,klines,'long');
+  const scShort = scoreSignal(coin,ta,mtfData,klines,'short');
+  // Re-run primary direction last so window globals reflect the winning signal
+  const primaryDir = scShort > scLong ? 'short' : 'long';
+  const sc = scoreSignal(coin,ta,mtfData,klines,primaryDir);
   const isPrime = sc>=8 && (window._lastBonusCount||0)>=4;
   let liqZones=null;
   try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
@@ -2818,7 +2854,7 @@ async function renderDetail(coin,klines,mtfData){
       ${sweepCardHtml}
       ${needsReviewHtml}
       <!-- Trade Summary Card -->
-      ${renderSummaryCard(sc, ta, d, dec, isPrime, window._lastSignalDir||'long')}
+      ${renderSummaryCard(sc, ta, d, dec, isPrime, window._lastSignalDir||'long', scLong, scShort, setup)}
       <!-- Long setup -->
       <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--green)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/7 bonuses stacked</span></div>':''}
@@ -3289,18 +3325,6 @@ function cleanupLiqQueue() {
   while (bybitLiqQueue.length && bybitLiqQueue[bybitLiqQueue.length-1].timestamp<cutoff) bybitLiqQueue.pop();
 }
 
-function checkForRealSweep(sig, currentPrice) {
-  const bybitSym = (COINS[sig.symbol]||{}).sym||(sig.symbol+'USDT');
-  const isLong = sig.lockedSetup.bias !== 'bearish';
-  const level = isLong ? sig.lockedSetup.invalidationLevel : (sig.lockedSetup.resistance||currentPrice*1.02);
-  const atr = sig.lockedSetup.atr||currentPrice*0.02;
-  for (const ev of bybitLiqQueue) {
-    if (ev.symbol !== bybitSym) continue;
-    const hit = isLong ? ev.price<=level : ev.price>=level;
-    if (hit && Math.abs(ev.price-currentPrice)<atr*2) return {hit:true,price:ev.price,side:ev.side,qty:ev.qty,timestamp:ev.timestamp};
-  }
-  return {hit:false};
-}
 
 function copySignalSnapshot() {
   var ctx  = pendingAIContext || {};
