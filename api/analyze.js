@@ -16,7 +16,8 @@ export default async function handler(req, res) {
       optimalLongEntry, optimalShortEntry, entryMode, mode,
       leverage, liqLong, liqShort, maxSafeStopPct,
       longStopPct, shortStopPct,
-      signalDir, score, scoreBreakdown, bonusCount, bonusSignals,
+      signalDir, score, scoreLong, scoreShort,
+      scoreBreakdown, bonusCount, bonusSignals,
       oiDelta, fundingDelta, oiMomentum,
       summaryCard, mtfSummary, liqZones, cvdSummary, candles
     } = req.body;
@@ -42,7 +43,9 @@ ALL stop losses in patternEntry MUST be within ${maxSafeStopPct ? parseFloat(max
     // ── Summary card context ───────────────────────────────────────────────
     const sumStr = summaryCard ? `
 ## PRE-ANALYZED SETUP (scanner output — use as context)
-Signal direction: ${summaryCard.direction} | Score: ${score}/10 | Bonuses active: ${bonusCount}/7
+Primary signal: ${summaryCard.direction} | Score: ${score}/10
+Directional scores: LONG ${scoreLong||'?'}/10 vs SHORT ${scoreShort||'?'}/10 — use the higher score direction
+Bonuses active: ${bonusCount}/7
 Scanner status: ${summaryCard.status}
 Confirmed factors: ${(summaryCard.working||[]).join(' | ') || 'none'}
 Missing/weak: ${(summaryCard.missing||[]).join(' | ') || 'none'}
