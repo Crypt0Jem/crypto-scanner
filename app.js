@@ -2993,12 +2993,12 @@ function calcFundingDelta(fundingHistory) {
   if (latest >  0.001) direction = 'bullish'; // longs paying — bullish pressure
   if (latest < -0.001) direction = 'bearish'; // shorts paying — bearish pressure
 
-  // Accelerating: consecutive moves in same direction AND getting stronger
+  // Accelerating: consecutive moves in same direction AND getting stronger by a meaningful amount
   const trend1 = prev   - older; // older change
   const trend2 = latest - prev;  // recent change
   const accelerating = !flipping &&
     Math.sign(trend2) === Math.sign(trend1) &&
-    Math.abs(trend2) > 0;
+    Math.abs(trend2) > 0.003; // 0.003% minimum — filters rounding noise
 
   // Extreme: >0.05% or <-0.05% — danger if opposite to your trade
   const extreme = Math.abs(latest) > 0.05;
