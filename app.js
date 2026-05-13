@@ -1809,12 +1809,25 @@ function scoreSignal(coin,ta,mtf,klines){
   }
   s+=vwapPts; breakdown.vwap=vwapPts;
 
-  // OI spike penalty
+  // 14. OI DELTA DIRECTION — bonus signal 6
+  // Uses real OI history from Bybit endpoint (stored in window._lastOIHistory by renderDetail)
+  // Fires when OI is expanding = new money entering the market, confirming the move
+  // Contracting OI = short covering or long liquidation = weak move, bonus stays off
+  var oiDeltaPts = 0;
+  if (confirmedKlines) { // consistent with other bonuses — only on closed candles
+    var _oiHist = window._lastOIHistory;
+    var _oidResult = calcOIDelta(_oiHist, d.change24h);
+    window._lastOIDelta = _oidResult;
+    if (_oidResult.aligned) oiDeltaPts = 1;
+  }
+  s += oiDeltaPts; breakdown.oiDelta = oiDeltaPts;
+
+  // OI spike penalty (existing — do not remove)
   var oiM=sym?calcOIMomentum(sym):null;
   if(oiM&&oiM.spike){ s=Math.max(0,s-1); breakdown.oiPenalty=-1; }
 
   // Track bonus count for Prime Setup detection
-  window._lastBonusCount=[pocPts,bbPts,rsiDivPts,bosPts,vwapPts].filter(function(x){return x>0;}).length;
+  window._lastBonusCount=[pocPts,bbPts,rsiDivPts,bosPts,vwapPts,oiDeltaPts].filter(function(x){return x>0;}).length;
 
   var final=Math.min(10,Math.max(0,Math.round(s)));
   window._lastScoreBreakdown=breakdown; // store for display
@@ -2401,6 +2414,7 @@ function renderBonusRow(ta, dec, klines){
   var vw  = window._lastVWAP            || {};
   var rd  = window._lastRSIDiv          || {};
   var bd  = window._lastScoreBreakdown  || {};
+  var oid = window._lastOIDelta         || {};
   var bonuses = [
     { label:'BB squeeze',
       on: !!(bb.squeeze && bb.breakoutAligned),
@@ -2421,7 +2435,11 @@ function renderBonusRow(ta, dec, klines){
     { label:'POC proximity',
       on: (bd.poc||0)>0,
       sub: (bd.poc||0)>0 ? 'At POC $'+fn(ta.poc,dec) : 'Away from POC',
-      detail: ta.poc ? '$'+fn(ta.poc,dec) : '' }
+      detail: ta.poc ? '$'+fn(ta.poc,dec) : '' },
+    { label:'OI expanding',
+      on: !!(oid.aligned),
+      sub: oid.expanding ? 'New money entering market' : (oid.changePct < 0 ? 'OI contracting' : 'OI flat'),
+      detail: oid.changePct !== undefined ? (oid.changePct >= 0 ? '+' : '')+oid.changePct+'% over 5 periods' : '' }
   ];
   var active = bonuses.filter(function(b){return b.on;}).length;
   var hdrCol = active>=3?'var(--purple)':active>=1?'var(--green)':'var(--text3)';
@@ -2446,7 +2464,7 @@ function renderBonusRow(ta, dec, klines){
     : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">✓ Closed candle</span>';
   return '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">'
     +'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-    +'<span>Bonus confluence — '+active+'/5 active</span>'
+    +'<span>Bonus confluence — '+active+'/6 active</span>'
     +candleNote
     +(active>=3 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">🔥 Prime threshold met</span>' : '')
     +'</div>'
@@ -2463,6 +2481,8 @@ async function renderDetail(coin,klines,mtfData){
   const bybitSym = COINS[coin].sym;
   const fundingHist = IS_MOBILE ? [] : await fetchFundingHistory(bybitSym);
   const fundingMom  = calcFundingMomentum(fundingHist);
+  const oiHistory   = IS_MOBILE ? [] : await fetchOIHistory(bybitSym);
+  window._lastOIHistory = oiHistory; // read by scoreSignal for bonus 6
   const oiMom       = calcOIMomentum(bybitSym);
   const sc=scoreSignal(coin,ta,mtfData,klines);
   const isPrime = sc>=8 && (window._lastBonusCount||0)>=3;
@@ -2959,6 +2979,45 @@ function calcFundingMomentum(history) {
   else if (direction === 'falling')   momentum = 'falling';
 
   return { momentum, direction, acceleration: +acceleration.toFixed(5), latest: c, flipped };
+}
+
+// Layer 2 — fetch 5 real OI data points from Bybit dedicated endpoint
+async function fetchOIHistory(bybitSym) {
+  try {
+    const r = await fetchWithTimeout(
+      'https://api.bybit.com/v5/market/open-interest?category=linear&symbol='+bybitSym+'&intervalTime=1h&limit=5',
+      6000
+    );
+    const list = r?.result?.list || [];
+    // Return oldest-first so index 0 = oldest, last = most recent
+    return list.map(function(item) {
+      return { oi: parseFloat(item.openInterest), timestamp: parseInt(item.timestamp) };
+    }).reverse();
+  } catch(e) {
+    console.warn('fetchOIHistory failed:', bybitSym, e.message);
+    return [];
+  }
+}
+
+// Layer 2 — compare first vs last OI value, classify vs price move direction
+// priceChange: positive = price rising, negative = price falling
+function calcOIDelta(oiHistory, priceChange) {
+  if (!oiHistory || oiHistory.length < 2) {
+    return { expanding: false, aligned: false, changePct: 0 };
+  }
+  const oldest    = oiHistory[0].oi;
+  const latest    = oiHistory[oiHistory.length - 1].oi;
+  const changePct = oldest > 0 ? ((latest - oldest) / oldest * 100) : 0;
+  const expanding = changePct > 0.3;   // OI growing meaningfully
+  // Aligned = OI expanding AND in same direction as price
+  const priceUp  = priceChange >= 0;
+  const aligned  = expanding && (
+    (priceUp)   ||   // price up + OI up = new longs entering
+    (!priceUp)       // price down + OI up = new shorts entering
+  );
+  // More precisely: expanding always aligns since new money is entering regardless of direction
+  // The anti-pattern is contracting OI with price move (short covering / long liq = weak)
+  return { expanding, aligned: expanding, changePct: +changePct.toFixed(2) };
 }
 
 // Track OI across refreshes (rolling 3-point window per symbol)
