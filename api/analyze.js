@@ -150,10 +150,11 @@ ${candleStr}
 5. Weight CVD divergence heavily — it overrides price trend signals
 6. Give exact prices to match coin's precision (${price} decimals as reference)
 7. entryTrigger must be a specific, testable condition — not vague
-8. ALWAYS populate entryPrice, stopLoss, tp1, tp2 — even for WAIT or AVOID. Never leave prices null.
-9. For WAIT entries: do NOT use current price as entry. Use the OPTIMAL pullback level — the nearest support, POC, VWAP, or liq zone in the direction of the trade. Better R:R = wait for price to come to you.
-10. If a liq zone sits below current price (long setup): set entryPrice at or just above that liq zone — price will likely sweep it before reversing. That sweep IS the entry signal.
-11. entryTrigger should state the exact candle close condition required — timeframe, price level, and one volume or momentum confirmation.
+8. ALWAYS populate entryPrice, stopLoss, tp1, tp2 — for ALL actions including AVOID. Never leave prices null.
+9. For WAIT: entryPrice = the optimal pullback level (nearest support, POC, liq zone below) — NOT current price. Price should come to you.
+10. For AVOID: entryPrice = the level where this setup WOULD be tradeable (e.g. liq sweep zone, key support). Show the user what to watch even if they should not enter now.
+11. If a liq zone sits below current price (long setup): set entryPrice at or just above that liq zone — price will likely sweep it before reversing. That sweep IS the entry signal.
+12. entryTrigger must state: exact price level + timeframe + one volume or momentum confirmation required.
 
 Respond ONLY in raw JSON:
 {
