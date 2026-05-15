@@ -4123,14 +4123,14 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
   const confCls=pat.confidence==='high'?'pb-high':pat.confidence==='medium'?'pb-medium':'pb-low';
   if(lNote){
     if(pe.longEntry){
-      lNote.innerHTML=`Pattern entry: $${fn(rPe.longEntry,dec)} | Pattern stop: $${fn(rPe.longStop,dec)} | ${rPe.entryRationale}`;
+      lNote.innerHTML=`Pattern entry: $${fn(rPe.longEntry,dec)} | Pattern stop: $${fn(rPe.longStop,dec)} | ${pe.longRationale||rPe.entryRationale||''}`;
     } else {
       lNote.style.display='none';
     }
   }
   if(sNote){
     if(pe.shortEntry){
-      sNote.innerHTML=`Pattern entry: $${fn(rPe.shortEntry,dec)} | Pattern stop: $${fn(rPe.shortStop,dec)} | ${rPe.entryRationale}`;
+      sNote.innerHTML=`Pattern entry: $${fn(rPe.shortEntry,dec)} | Pattern stop: $${fn(rPe.shortStop,dec)} | ${pe.shortRationale||rPe.entryRationale||''}`;
     } else {
       sNote.style.display='none';
     }
