@@ -2880,7 +2880,7 @@ async function renderDetail(coin,klines,mtfData){
           </span>
           ${isLocked?'<button onclick="invalidateSignal(\''+coin+'\',\''+activeTF+'\',\'dismissed\');selectCoin(\''+coin+'\')" style="font-size:9px;background:rgba(255,77,77,0.1);color:var(--red);border:1px solid var(--red-b);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">✕ Dismiss</button>':''}
         </div>
-        <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.lE,dec)}</span></div>
+        <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb" id="l-entry">$${fn(setup.lE,dec)}</span></div>
         <div class="srow" style="${setup.levAdjustedLong?'background:rgba(74,158,255,0.05);border-radius:6px;padding:6px 4px;margin-bottom:2px':''}">
           <span class="skey">Stop loss</span>
           <span class="sval vr">
@@ -2894,8 +2894,8 @@ async function renderDetail(coin,klines,mtfData){
           </span>
         </div>
         <div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqLong,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
-        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg">$${fn(setup.lTP1,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.lRew.toFixed(3)}%</span></span></div>
-        <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg">$${fn(setup.lTP2,dec)}</span></div>
+        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="l-tp1">$${fn(setup.lTP1,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.lRew.toFixed(3)}%</span></span></div>
+        <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="l-tp2">$${fn(setup.lTP2,dec)}</span></div>
         <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.lRR.toFixed(2)}:1 <span class="rrtag ${setup.lRR>=1.5?'rrg':'rrr'}">${setup.lRR>=1.5?'good':'weak'}</span></span></div>
         <div class="srow"><span class="skey">ATR volatility</span><span class="sval">${safeFormatATR(ta.atr, d.price)}</span></div>
 
@@ -2918,7 +2918,7 @@ async function renderDetail(coin,klines,mtfData){
           ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-left:6px">'+lockedSig.dynamic.candlesElapsed+' candle'+(lockedSig.dynamic.candlesElapsed!==1?'s':'')+' ago</span>':''}
           </span>
         </div>
-        <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb">$${fn(setup.sE,dec)}</span></div>
+        <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb" id="s-entry">$${fn(setup.sE,dec)}</span></div>
         <div class="srow" style="${setup.levAdjustedShort?'background:rgba(74,158,255,0.05);border-radius:6px;padding:6px 4px;margin-bottom:2px':''}">
           <span class="skey">Stop loss</span>
           <span class="sval vr">
@@ -2932,8 +2932,8 @@ async function renderDetail(coin,klines,mtfData){
           </span>
         </div>
         <div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqShort,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
-        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg">$${fn(setup.sTP1,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.sRew.toFixed(3)}%</span></span></div>
-        <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg">$${fn(setup.sTP2,dec)}</span></div>
+        <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="s-tp1">$${fn(setup.sTP1,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.sRew.toFixed(3)}%</span></span></div>
+        <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="s-tp2">$${fn(setup.sTP2,dec)}</span></div>
         <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.sRR.toFixed(2)}:1 <span class="rrtag ${setup.sRR>=1.5?'rrg':'rrr'}">${setup.sRR>=1.5?'good':'weak'}</span></span></div>
         <div class="srow"><span class="skey">ATR volatility</span><span class="sval">${safeFormatATR(ta.atr, d.price)}</span></div>
 
@@ -3085,6 +3085,7 @@ function renderScanBody(){
 }
 
 async function selectCoin(c){
+  window._lastAISetup = null; // clear AI values when switching coins
   tradeLogView = false;
   activeCoin=c;aiCache={};
   document.getElementById('main-content').innerHTML=`<div class="loading-full"><div class="spin"></div><span>Loading ${c} (${activeMode} mode)...</span></div>`;
@@ -4134,6 +4135,27 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
       sNote.style.display='none';
     }
   }
+
+  // ── AI overrides setup card entry/TP values (Option A) ────────────────────
+  // Update entry and TP spans in place — stop stays as scanner (leverage-adjusted)
+  // Show AI badge so user knows values came from pattern analysis
+  function setAIVal(id, val, fmt2) {
+    var el = document.getElementById(id);
+    if(!el || !val) return;
+    el.innerHTML = '$' + fmt2(val)
+      + '<span style="font-size:9px;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:var(--mono)">AI</span>';
+  }
+  var fmt2 = function(v){ return fn(v, dec); };
+  if(pe.longEntry)  setAIVal('l-entry', rPe.longEntry,  fmt2);
+  if(pe.longTP1)    setAIVal('l-tp1',   rPe.longTP1,    fmt2);
+  if(pe.longTP2)    setAIVal('l-tp2',   rPe.longTP2,    fmt2);
+  if(pe.shortEntry) setAIVal('s-entry', rPe.shortEntry, fmt2);
+  if(pe.shortTP1)   setAIVal('s-tp1',   rPe.shortTP1,   fmt2);
+  if(pe.shortTP2)   setAIVal('s-tp2',   rPe.shortTP2,   fmt2);
+
+  // Also update summary card entry row to match
+  window._lastAISetup = rPe;
+  // ────────────────────────────────────────────────────────────────────────────
   if(patternEl){
     var patternLevelsHtml = '';
     if(pe.longEntry||pe.shortEntry){
