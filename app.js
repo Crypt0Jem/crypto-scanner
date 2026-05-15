@@ -2465,7 +2465,7 @@ function renderAlerts(scores){
   el.innerHTML='<div class="alerts-bar"><span class="alert-lbl">High conviction</span>'+fired.map(function(e){return '<span class="alert-item">'+e[0]+' — '+e[1]+'/10 Long setup</span>';}).join('')+'</div>';
 }
 
-function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir, scLong, scShort, setup) {
+function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir, scLong, scShort, setup, lockedSig) {
   var bd  = window._lastScoreBreakdown || {};
   var isLong  = signalDir === 'long';
   var fn2 = function(n){ return n?Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
@@ -2571,9 +2571,16 @@ function renderSummaryCard(sc, ta, d, dec, isPrime, signalDir, scLong, scShort, 
     +'</div>'
     +(function(){
       if(!setup||sc<5) return '';
-      var e  = isLong ? setup.lE   : setup.sE;
-      var sl = isLong ? setup.lSL  : setup.sSL;
-      var t1 = isLong ? setup.lTP1 : setup.sTP1;
+      // FIX 3c: when locked, use frozen entry/TP from lockedSetup — not freshSetup
+      // This stops the summary card showing different numbers to the locked setup cards
+      var ls = lockedSig ? lockedSig.lockedSetup : null;
+      var e  = isLong
+        ? (ls ? ls.entry      : setup.lE)
+        : (ls ? ls.shortEntry||setup.sE : setup.sE);
+      var sl = isLong ? setup.lSL  : setup.sSL;  // stop is always live (recalculated)
+      var t1 = isLong
+        ? (ls ? ls.takeProfits[0] : setup.lTP1)
+        : (ls ? ls.shortTPs?.[0]||setup.sTP1 : setup.sTP1);
       var rr = (e&&sl&&t1) ? (Math.abs(t1-e)/Math.abs(e-sl)).toFixed(1)+'R' : '—';
       var px = function(n){ return n?'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
       return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap">'
@@ -2681,6 +2688,9 @@ async function renderDetail(coin,klines,mtfData){
   // Re-run primary direction last so window globals reflect the winning signal
   const primaryDir = scShort > scLong ? 'short' : 'long';
   const sc = scoreSignal(coin,ta,mtfData,klines,primaryDir);
+  // FIX 1: Pin signalDir immediately after all 3 score calls — prevents race
+  // where summary card reads stale direction from an intermediate scoreSignal run
+  window._lastSignalDir = primaryDir;
   const isPrime = sc>=8 && (window._lastBonusCount||0)>=4;
   let liqZones=null;
   try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
@@ -2729,6 +2739,9 @@ async function renderDetail(coin,klines,mtfData){
       // No active signal + score qualifies → lock a new one
       lockSignal(coin,activeTF,ta,freshSetup,sc,d.price,pivots,liqZones);
       lockedSig=swingSignals[coin+'_'+activeTF];
+      // FIX 2: Set bias immediately at lock time — don't wait for AI
+      // sweep detection and invalidation use bias, so null bias breaks them
+      if(lockedSig) lockedSig.lockedSetup.bias = primaryDir;
     }
   }
   const isLocked=!!lockedSig;
@@ -2857,7 +2870,7 @@ async function renderDetail(coin,klines,mtfData){
       ${sweepCardHtml}
       ${needsReviewHtml}
       <!-- Trade Summary Card -->
-      ${renderSummaryCard(sc, ta, d, dec, isPrime, window._lastSignalDir||'long', scLong, scShort, setup)}
+      ${renderSummaryCard(sc, ta, d, dec, isPrime, primaryDir, scLong, scShort, setup, lockedSig)}
       <!-- Long setup -->
       <div class="card" style="${isPrime?'border-left:3px solid #a78bfa':'border-left:3px solid var(--green)'}${isLocked?';border-top:1px solid rgba(245,166,35,0.4)':''}">
         ${isPrime?'<div style="background:rgba(167,139,250,0.08);border-bottom:1px solid rgba(167,139,250,0.2);margin:-12px -16px 12px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#a78bfa;font-family:var(--mono);font-weight:600">&#x1F525; Prime setup</span><span style="font-size:10px;color:rgba(167,139,250,0.7);font-family:var(--mono)">'+(window._lastBonusCount||0)+'/7 bonuses stacked</span></div>':''}
