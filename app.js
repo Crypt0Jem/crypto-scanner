@@ -2149,9 +2149,10 @@ return rows;
 if(!setup||sc<5) return '';
 var ls = lockedSig ? lockedSig.lockedSetup : null;
 var ais = window._lastAISetup || null;
+var wv = (sum && sum.waitLevel) ? sum.waitLevel.val : null;
 var e = isLong
-? (ais && ais.longEntry ? ais.longEntry : ls ? ls.entry : setup.lE)
-: (ais && ais.shortEntry ? ais.shortEntry : ls ? ls.shortEntry||setup.sE : setup.sE);
+? (ais && ais.longEntry ? ais.longEntry : wv ? wv : ls ? ls.entry : setup.lE)
+: (ais && ais.shortEntry ? ais.shortEntry : wv ? wv : ls ? ls.shortEntry||setup.sE : setup.sE);
 var sl = isLong ? setup.lSL : setup.sSL;
 var t1 = isLong
 ? (ais && ais.longTP1 ? ais.longTP1 : ls ? ls.takeProfits[0] : setup.lTP1)
