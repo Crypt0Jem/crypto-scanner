@@ -854,18 +854,32 @@ const longStopDec=activeLev>1?Math.min(atrStopLong,maxStopDec):atrStopLong;
 const shortStopDec=activeLev>1?Math.min(atrStopShort,maxStopDec):atrStopShort;
 const lSL=+(lE*(1-longStopDec)).toFixed(dec);
 const lRisk=longStopDec*100;
-const lTP1=+(lE*(1+longStopDec*2.5)).toFixed(dec);
-const lTP2=+(lE*(1+longStopDec*4.0)).toFixed(dec);
-const taResist=ta&&ta.resistance?ta.resistance:0;
-const lTP3=taResist>lTP2?+taResist.toFixed(dec):+(lE*(1+longStopDec*7.0)).toFixed(dec);
+const lEma20 = ta&&ta.ema20 ? ta.ema20 : 0;
+const lResist = ta&&ta.resistance ? ta.resistance : 0;
+const lLiqAbove = liqZones&&liqZones.topShortLiq
+? (liqZones.topShortLiq.filter(function(z){return z.price>lE;}).sort(function(a,b){return a.price-b.price;})[0]||{}).price||0
+: 0;
+const lTP1raw = lEma20>lE ? lEma20 : lE*1.05;
+const lTP1 = +lTP1raw.toFixed(dec);
+const lTP2raw = lLiqAbove>lTP1 ? lLiqAbove : lResist>lTP1 ? lE+(lResist-lE)*0.5 : lE*1.10;
+const lTP2 = +lTP2raw.toFixed(dec);
+const lTP3raw = lResist>lTP2 ? lResist : lE*1.20;
+const lTP3 = +lTP3raw.toFixed(dec);
 const lRew=(lTP1-lE)/lE*100;
 const lRR=lRew/lRisk;
 const sSL=+(sE*(1+shortStopDec)).toFixed(dec);
 const sRisk=shortStopDec*100;
-const sTP1=+(sE*(1-shortStopDec*2.5)).toFixed(dec);
-const sTP2=+(sE*(1-shortStopDec*4.0)).toFixed(dec);
-const taSupport=ta&&ta.support?ta.support:0;
-const sTP3=taSupport>0&&taSupport<sTP2?+taSupport.toFixed(dec):+(sE*(1-shortStopDec*7.0)).toFixed(dec);
+const sEma20 = ta&&ta.ema20 ? ta.ema20 : 0;
+const sSupport = ta&&ta.support ? ta.support : 0;
+const sLiqBelow = liqZones&&liqZones.topLongLiq
+? (liqZones.topLongLiq.filter(function(z){return z.price<sE;}).sort(function(a,b){return b.price-a.price;})[0]||{}).price||0
+: 0;
+const sTP1raw = sEma20>0&&sEma20<sE ? sEma20 : sE*0.95;
+const sTP1 = +sTP1raw.toFixed(dec);
+const sTP2raw = sLiqBelow>0&&sLiqBelow<sTP1 ? sLiqBelow : sSupport>0&&sSupport<sTP1 ? sE-(sE-sSupport)*0.5 : sE*0.90;
+const sTP2 = +sTP2raw.toFixed(dec);
+const sTP3raw = sSupport>0&&sSupport<sTP2 ? sSupport : sE*0.80;
+const sTP3 = +sTP3raw.toFixed(dec);
 const sRew=(sE-sTP1)/sE*100;
 const sRR=sRew/sRisk;
 const levAdjustedLong=activeLev>1&&atrStopLong>maxStopDec;
