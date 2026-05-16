@@ -2154,10 +2154,13 @@ var wv = (_sum && _sum.waitLevel) ? _sum.waitLevel.val : null;
 var e = isLong
 ? (ais && ais.longEntry ? ais.longEntry : wv ? wv : ls ? ls.entry : setup.lE)
 : (ais && ais.shortEntry ? ais.shortEntry : wv ? wv : ls ? ls.shortEntry||setup.sE : setup.sE);
-var sl = isLong ? setup.lSL : setup.sSL;
+var maxSD = setup.maxStopPct ? setup.maxStopPct/100 : 0.0096;
+var sl = isLong
+? (ais && ais.longStop ? ais.longStop : +(e*(1-maxSD)).toFixed(dec))
+: (ais && ais.shortStop ? ais.shortStop : +(e*(1+maxSD)).toFixed(dec));
 var t1 = isLong
-? (ais && ais.longTP1 ? ais.longTP1 : ls ? ls.takeProfits[0] : setup.lTP1)
-: (ais && ais.shortTP1 ? ais.shortTP1 : ls ? ls.shortTPs?.[0]||setup.sTP1 : setup.sTP1);
+? (ais && ais.longTP1 ? ais.longTP1 : +(e + Math.abs(e-sl)*2.5).toFixed(dec))
+: (ais && ais.shortTP1 ? ais.shortTP1 : +(e - Math.abs(sl-e)*2.5).toFixed(dec));
 var rr = (e&&sl&&t1) ? (Math.abs(t1-e)/Math.abs(e-sl)).toFixed(1)+'R' : '—';
 var px = function(n){ return n?'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
 return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap">'
