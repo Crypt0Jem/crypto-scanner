@@ -2100,7 +2100,10 @@ actionCol='#a78bfa'; actionBg='rgba(167,139,250,0.10)';
 action='⚡ Enter on next closed candle';
 actionCol='var(--green)'; actionBg='rgba(0,208,132,0.07)';
 } else if(sc>=7&&waitLevel){
-action='👁 Good setup — wait for $'+fn2(waitLevel.val)+' ('+waitLevel.label+')';
+var _aiE=window._lastAISetup?(isLong?window._lastAISetup.longEntry:window._lastAISetup.shortEntry):null;
+var _wv=_aiE?fn2(_aiE):fn2(waitLevel.val);
+var _wl=_aiE?'AI pattern entry':waitLevel.label;
+action='👁 Good setup — wait for $'+_wv+' ('+_wl+')';
 actionCol='var(--amber)'; actionBg='rgba(245,166,35,0.07)';
 } else if(sc>=5&&waitLevel){
 action='⌛ Setup forming — watch $'+fn2(waitLevel.val)+' ('+waitLevel.label+')';
@@ -2145,13 +2148,14 @@ return rows;
 +(function(){
 if(!setup||sc<5) return '';
 var ls = lockedSig ? lockedSig.lockedSetup : null;
+var ais = window._lastAISetup || null;
 var e = isLong
-? (ls ? ls.entry : setup.lE)
-: (ls ? ls.shortEntry||setup.sE : setup.sE);
+? (ais && ais.longEntry ? ais.longEntry : ls ? ls.entry : setup.lE)
+: (ais && ais.shortEntry ? ais.shortEntry : ls ? ls.shortEntry||setup.sE : setup.sE);
 var sl = isLong ? setup.lSL : setup.sSL;
 var t1 = isLong
-? (ls ? ls.takeProfits[0] : setup.lTP1)
-: (ls ? ls.shortTPs?.[0]||setup.sTP1 : setup.sTP1);
+? (ais && ais.longTP1 ? ais.longTP1 : ls ? ls.takeProfits[0] : setup.lTP1)
+: (ais && ais.shortTP1 ? ais.shortTP1 : ls ? ls.shortTPs?.[0]||setup.sTP1 : setup.sTP1);
 var rr = (e&&sl&&t1) ? (Math.abs(t1-e)/Math.abs(e-sl)).toFixed(1)+'R' : '—';
 var px = function(n){ return n?'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
 return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap">'
