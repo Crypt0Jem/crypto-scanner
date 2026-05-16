@@ -1,7 +1,16 @@
 {
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/app.js", "destination": "/app.js" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "functions": {
+    "api/analyze.js": {
+      "maxDuration": 30
+    },
+    "api/alert.js": {
+      "maxDuration": 15
+    },
+    "api/telegram.js": {
+      "maxDuration": 15
+    },
+    "api/market.js": {
+      "maxDuration": 15
+    }
+  }
 }
