@@ -2979,6 +2979,22 @@ async function renderDetail(coin,klines,mtfData){
           <div class="metric"><div class="mlbl">Volume POC</div><div class="mval vb">$${fn(ta.poc,dec>2?2:dec)}</div><div class="msub">Highest volume</div></div>
         </div>
         ${renderBonusRow(ta, dec, klines)}
+        <!-- CVD chart inside Technical Indicators -->
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:var(--text3);font-family:var(--mono)">Order flow — CVD (Cumulative Volume Delta)</span>
+              <span style="font-size:9px;color:${cvdData.trend==='bullish'?'var(--green)':cvdData.trend==='bearish'?'var(--red)':'var(--text2)'};font-family:var(--mono);font-weight:600">${cvdData.trend.toUpperCase()}</span>
+            </div>
+            ${cvdData.divergence
+              ? `<span style="font-size:9px;padding:2px 8px;border-radius:3px;font-family:var(--mono);background:${cvdData.divergence.type==='bearish'?'rgba(255,77,77,.2)':'rgba(0,208,132,.2)'};color:${cvdData.divergence.type==='bearish'?'var(--red)':'var(--green)'}">${cvdData.divergence.label}</span>`
+              : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">No divergence</span>'
+            }
+          </div>
+          <div class="cvd-canvas-wrap">
+            <canvas id="cvd-chart" role="img" aria-label="CVD order flow delta chart"></canvas>
+          </div>
+        </div>
       </div>
 
       <!-- OI -->
@@ -4123,14 +4139,14 @@ async function loadAI(coin,ta,sc,setup,klines,mtfData,liqZones,cvdData){
   const confCls=pat.confidence==='high'?'pb-high':pat.confidence==='medium'?'pb-medium':'pb-low';
   if(lNote){
     if(pe.longEntry){
-      lNote.innerHTML=`Pattern entry: $${fn(rPe.longEntry,dec)} | Pattern stop: $${fn(rPe.longStop,dec)} | ${pe.longRationale||rPe.entryRationale||''}`;
+      lNote.innerHTML=`Pattern entry: $${fn(rPe.longEntry,dec)} | Pattern stop: $${fn(rPe.longStop,dec)} | ${rPe.entryRationale}`;
     } else {
       lNote.style.display='none';
     }
   }
   if(sNote){
     if(pe.shortEntry){
-      sNote.innerHTML=`Pattern entry: $${fn(rPe.shortEntry,dec)} | Pattern stop: $${fn(rPe.shortStop,dec)} | ${pe.shortRationale||rPe.entryRationale||''}`;
+      sNote.innerHTML=`Pattern entry: $${fn(rPe.shortEntry,dec)} | Pattern stop: $${fn(rPe.shortStop,dec)} | ${rPe.entryRationale}`;
     } else {
       sNote.style.display='none';
     }
