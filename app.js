@@ -1846,17 +1846,23 @@ missing: sum.missing||[],
 waitLevel: sum.waitLevel||null,
 atKeyLevel: sum.atKeyLevel||null
 },
-liqZones: liqZones ? {
-fundingBias:liqZones.fundingBias,
-majorLongCluster:liqZones.majorLongCluster.priceRange,
-majorShortCluster:liqZones.majorShortCluster.priceRange,
-nearestLongSweep:liqZones.nearestLongSweep.price,
-nearestShortSweep:liqZones.nearestShortSweep.price,
-topLongLiq:liqZones.topLongLiq.map(z=>z.price).join(', '),
-topShortLiq:liqZones.topShortLiq.map(z=>z.price).join(', '),
-longSweepEntry:liqZones.longSweepEntry,
-shortSweepEntry:liqZones.shortSweepEntry
-} : null,
+liqZones: liqZones ? (() => {
+try {
+const lse = liqZones.longSweepEntry||{};
+const sse = liqZones.shortSweepEntry||{};
+return {
+fundingBias: liqZones.fundingBias||'neutral',
+majorLongCluster: liqZones.majorLongCluster?.priceRange||'',
+majorShortCluster: liqZones.majorShortCluster?.priceRange||'',
+nearestLongSweep: liqZones.nearestLongSweep?.price||null,
+nearestShortSweep: liqZones.nearestShortSweep?.price||null,
+topLongLiq: (liqZones.topLongLiq||[]).map(z=>+(z.price||0)).join(', '),
+topShortLiq: (liqZones.topShortLiq||[]).map(z=>+(z.price||0)).join(', '),
+longSweepEntry: { entry:lse.entry||null, stop:lse.stop||null, tp1:lse.tp1||null, tp2:lse.tp2||null, logic:lse.logic||'' },
+shortSweepEntry: { entry:sse.entry||null, stop:sse.stop||null, tp1:sse.tp1||null, tp2:sse.tp2||null, logic:sse.logic||'' }
+};
+} catch(e) { return null; }
+})() : null,
 mtfSummary: mtfData ? {
 confluenceLabel:mtfData.confluenceLabel,
 confluenceScore:mtfData.confluenceScore,
