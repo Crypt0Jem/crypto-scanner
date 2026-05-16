@@ -143,7 +143,7 @@ ${liqStr}
 ${candleStr}
 
 ## INSTRUCTIONS
-1. Your primary output is entryDecision — the best trade available RIGHT NOW at current price
+1. Your primary output is entryDecision — ONE clear recommendation
 2. Stop loss MUST be within ${maxSafeStopPct ? parseFloat(maxSafeStopPct).toFixed(3) : '?'}% of entry (${leverage}x leverage hard limit)
 3. Use scanner's pre-analyzed context — don't re-derive what's already computed
 4. Flag counter-trend setups, reduce conviction accordingly
@@ -152,17 +152,9 @@ ${candleStr}
 7. entryTrigger must be a specific, testable condition — not vague
 8. ALWAYS populate entryPrice, stopLoss, tp1, tp2 — for ALL actions including AVOID. Never leave prices null.
 9. For WAIT: entryPrice = the optimal pullback level (nearest support, POC, liq zone below) — NOT current price. Price should come to you.
-10. For AVOID: entryPrice = the level where this setup WOULD be tradeable. Show the user what to watch even if they should not enter now.
+10. For AVOID: entryPrice = the level where this setup WOULD be tradeable (e.g. liq sweep zone, key support). Show the user what to watch even if they should not enter now.
 11. If a liq zone sits below current price (long setup): set entryPrice at or just above that liq zone — price will likely sweep it before reversing. That sweep IS the entry signal.
 12. entryTrigger must state: exact price level + timeframe + one volume or momentum confirmation required.
-
-## CRITICAL — TREAT BOTH DIRECTIONS AS FULL INDEPENDENT TRADES
-13. ALL 8 patternEntry fields are required — longEntry, longStop, longTP1, longTP2, shortEntry, shortStop, shortTP1, shortTP2. Never null.
-14. LONG bias but price is ABOVE the long entry zone? The SHORT is the active trade right now. Price must come DOWN to reach the long entry — that move down is a real short setup with its own entry, stop, and TPs. Analyze it fully using pattern structure, CVD, resistance, and liq zones above. Do NOT just say "wait for long" and leave the short as an afterthought.
-15. SHORT bias but price is BELOW the short entry zone? The LONG is the active trade right now. Same logic applies — treat it as a full setup.
-16. Each direction gets its own rationale — longRationale explains the long setup specifically, shortRationale explains the short setup specifically.
-17. longTP1 MUST be above longEntry. longTP2 MUST be above longTP1. shortTP1 MUST be below shortEntry. shortTP2 MUST be below shortTP1. longStop MUST be below longEntry. shortStop MUST be above shortEntry.
-18. longCase and shortCase must each be a complete independent analysis with specific price targets and what confirms/invalidates the move.
 
 Respond ONLY in raw JSON:
 {
@@ -198,16 +190,14 @@ Respond ONLY in raw JSON:
     "longStop": price,
     "longTP1": price,
     "longTP2": price,
-    "longRationale": "1 sentence — why this long entry: what pattern/CVD/liq zone supports it",
     "shortEntry": price,
     "shortStop": price,
     "shortTP1": price,
     "shortTP2": price,
-    "shortRationale": "1 sentence — why this short entry: what pattern/CVD/resistance/liq zone supports it",
-    "entryRationale": "1 sentence — which direction is the active trade right now and why"
+    "entryRationale": "1 sentence — pattern + MTF + CVD rationale"
   },
-  "longCase": "Full bull case: entry catalyst, specific price target, what CVD+OI+MTF confirm, what invalidates",
-  "shortCase": "Full bear case: entry catalyst, specific price target, what CVD+OI+MTF confirm, what invalidates",
+  "longCase": "bull case with MTF + CVD + OI context",
+  "shortCase": "bear case with MTF + CVD + OI context",
   "keyRisk": "biggest risk for this setup at ${leverage}x",
   "watchLevel": "price to watch for confirmation",
   "suggestedAction": "precise next action with timeframe",
@@ -224,7 +214,7 @@ Respond ONLY in raw JSON:
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1800,
+        max_tokens: 2400,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -235,9 +225,28 @@ Respond ONLY in raw JSON:
     const text = (data.content||[]).map(b=>b.text||'').join('').trim();
     const start = text.indexOf('{');
     const end   = text.lastIndexOf('}');
-    if (start === -1) return res.status(500).json({ error: 'No JSON in response' });
+    if (start === -1) return res.status(500).json({ error: 'No JSON in response', raw: text.slice(0,200) });
 
-    const parsed = JSON.parse(text.substring(start, end+1));
+    let parsed;
+    try {
+      parsed = JSON.parse(text.substring(start, end+1));
+    } catch(parseErr) {
+      // Response was truncated — try to salvage by closing open brackets
+      let partial = text.substring(start);
+      // Count unclosed braces and close them
+      let depth = 0;
+      for(const ch of partial) { if(ch==='{') depth++; else if(ch==='}') depth--; }
+      // Remove trailing incomplete property (find last complete property)
+      partial = partial.replace(/,\s*"[^"]*"\s*:\s*[^,}\]]*$/, '');
+      // Close all open braces
+      partial += '}'.repeat(Math.max(0, depth));
+      try {
+        parsed = JSON.parse(partial);
+        parsed._truncated = true;
+      } catch(e2) {
+        return res.status(500).json({ error: 'JSON parse failed: ' + parseErr.message, raw: text.slice(0,500) });
+      }
+    }
     return res.status(200).json(parsed);
 
   } catch(e) {
