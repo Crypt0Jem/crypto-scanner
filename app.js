@@ -842,7 +842,7 @@ const optimalShort=resistEntry>price ? Math.min(resistEntry,rallyEntry) : rallyE
 const isOpt=entryMode==='optimal';
 return{long:isOpt?optimalLong:price,short:isOpt?optimalShort:price,atr,pullbackPct:((price-(isOpt?optimalLong:price))/price*100),rallyPct:(((isOpt?optimalShort:price)-price)/price*100)};
 }
-function calcSetups(entries,dec){
+function calcSetups(entries,dec,ta){
 const{long:lE,short:sE,atr}=entries;
 const mmr=activeLev>=100?0.005:activeLev>=25?0.004:0.003;
 const imr=1/activeLev;
@@ -856,14 +856,16 @@ const lSL=+(lE*(1-longStopDec)).toFixed(dec);
 const lRisk=longStopDec*100;
 const lTP1=+(lE*(1+longStopDec*2.5)).toFixed(dec);
 const lTP2=+(lE*(1+longStopDec*4.0)).toFixed(dec);
-const lTP3=+(lE*(1+longStopDec*7.0)).toFixed(dec);
+const taResist=ta&&ta.resistance?ta.resistance:0;
+const lTP3=taResist>lTP2?+taResist.toFixed(dec):+(lE*(1+longStopDec*7.0)).toFixed(dec);
 const lRew=(lTP1-lE)/lE*100;
 const lRR=lRew/lRisk;
 const sSL=+(sE*(1+shortStopDec)).toFixed(dec);
 const sRisk=shortStopDec*100;
 const sTP1=+(sE*(1-shortStopDec*2.5)).toFixed(dec);
 const sTP2=+(sE*(1-shortStopDec*4.0)).toFixed(dec);
-const sTP3=+(sE*(1-shortStopDec*7.0)).toFixed(dec);
+const taSupport=ta&&ta.support?ta.support:0;
+const sTP3=taSupport>0&&taSupport<sTP2?+taSupport.toFixed(dec):+(sE*(1-shortStopDec*7.0)).toFixed(dec);
 const sRew=(sE-sTP1)/sE*100;
 const sRR=sRew/sRisk;
 const levAdjustedLong=activeLev>1&&atrStopLong>maxStopDec;
@@ -2278,7 +2280,7 @@ try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotio
 catch(e){ console.warn('LiqZones failed:',e); }
 const v=verdictOf(sc,ta,window._lastCvdData);
 const entries=calcEntries(d.price,ta,dec);
-const freshSetup=calcSetups(entries,dec);
+const freshSetup=calcSetups(entries,dec,ta);
 let setup=freshSetup;
 let lockedSig=null;
 if(activeMode==='swing'){
