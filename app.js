@@ -675,8 +675,16 @@ invalidateSignal(coin, tf, 'expired after 5 candles');
 return null;
 }
 const inv = sig.lockedSetup.invalidationLevel;
-if(sig.lockedSetup.bias !== 'short' && currentPrice < inv * 0.998){
-invalidateSignal(coin, tf, `price ${currentPrice} broke invalidation ${inv}`);
+const bias = sig.lockedSetup.bias;
+if(bias !== 'short' && inv && currentPrice < inv * 0.998){
+invalidateSignal(coin, tf, `long invalidated: price ${currentPrice} broke support ${inv}`);
+return null;
+}
+const shortInv = sig.lockedSetup.shortEntry
+? sig.lockedSetup.shortEntry * 1.02
+: (sig.lockedSetup.resistance || sig.lockedSetup.entry * 1.05);
+if(bias === 'short' && currentPrice > shortInv){
+invalidateSignal(coin, tf, `short invalidated: price ${currentPrice} broke above ${shortInv.toFixed(4)}`);
 return null;
 }
 if(currentScore < 4){
