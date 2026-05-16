@@ -1783,10 +1783,16 @@ const dec=COINS[coin].dec;
 const bd=window._lastScoreBreakdown||{};
 const sum=window._lastSummaryData||{};
 try{
+const safeStringify = (obj) => JSON.stringify(obj, (k,v) => {
+if(v !== v) return null;
+if(v === undefined) return null;
+if(typeof v === 'number' && !isFinite(v)) return null;
+return v;
+});
 const res=await fetch('/api/analyze',{
 method:'POST',
 headers:{'Content-Type':'application/json'},
-body:JSON.stringify({
+body:safeStringify({
 coin, tf:activeTF, price:d.price, change24h:d.change24h,
 high24h:d.high24h, low24h:d.low24h, volume24h:d.volume24h,
 rsi:ta.rsi.toFixed(1), trend:ta.trend,
