@@ -2159,14 +2159,18 @@ var sl = isLong
 ? (ais && ais.longStop ? ais.longStop : +(e*(1-maxSD)).toFixed(dec))
 : (ais && ais.shortStop ? ais.shortStop : +(e*(1+maxSD)).toFixed(dec));
 var t1 = isLong
-? (ais && ais.longTP1 ? ais.longTP1 : +(e + Math.abs(e-sl)*2.5).toFixed(dec))
-: (ais && ais.shortTP1 ? ais.shortTP1 : +(e - Math.abs(sl-e)*2.5).toFixed(dec));
+? (ais && ais.longTP1 ? ais.longTP1 : setup.lTP1||null)
+: (ais && ais.shortTP1 ? ais.shortTP1 : setup.sTP1||null);
+var t2 = isLong
+? (ais && ais.longTP2 ? ais.longTP2 : setup.lTP2||null)
+: (ais && ais.shortTP2 ? ais.shortTP2 : setup.sTP2||null);
 var rr = (e&&sl&&t1) ? (Math.abs(t1-e)/Math.abs(e-sl)).toFixed(1)+'R' : '—';
 var px = function(n){ return n?'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
 return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap">'
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">Entry </span><span style="color:var(--text1);font-weight:600">'+px(e)+'</span></div>'
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">Stop </span><span style="color:var(--red);font-weight:600">'+px(sl)+'</span></div>'
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">TP1 </span><span style="color:var(--green);font-weight:600">'+px(t1)+'</span></div>'
++(t2?'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">TP2 </span><span style="color:var(--green);font-weight:600">'+px(t2)+'</span></div>':'')
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">R:R </span><span style="color:var(--text2)">'+rr+'</span></div>'
 +'</div>';
 })()
