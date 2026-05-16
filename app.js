@@ -833,8 +833,6 @@ return{rsi,ema20,ema50,atr,trend,support,resistance,volProfile,poc,volumeSpike,t
 }
 function calcEntries(price,ta,dec){
 const atr=ta.atr||price*0.02;
-const _res=ta.resistance||null;
-const _sup=ta.support||null;
 const supportEntry=+(ta.support+atr*0.3).toFixed(dec);
 const pullbackEntry=+(price-atr*0.75).toFixed(dec);
 const optimalLong=Math.min(Math.max(supportEntry,pullbackEntry), price);
@@ -858,18 +856,16 @@ const lSL=+(lE*(1-longStopDec)).toFixed(dec);
 const lRisk=longStopDec*100;
 const lTP1=+(lE*(1+longStopDec*2.5)).toFixed(dec);
 const lTP2=+(lE*(1+longStopDec*4.0)).toFixed(dec);
-const lTP3=_res&&_res>lTP2
-? +_res.toFixed(dec)
-: +(lE*(1+longStopDec*7.0)).toFixed(dec);
+const taRes=ta.resistance||0;
+const lTP3=taRes>lTP2?+taRes.toFixed(dec):+(lE*(1+longStopDec*7.0)).toFixed(dec);
 const lRew=(lTP1-lE)/lE*100;
 const lRR=lRew/lRisk;
 const sSL=+(sE*(1+shortStopDec)).toFixed(dec);
 const sRisk=shortStopDec*100;
 const sTP1=+(sE*(1-shortStopDec*2.5)).toFixed(dec);
 const sTP2=+(sE*(1-shortStopDec*4.0)).toFixed(dec);
-const sTP3=_sup&&_sup<sTP2
-? +_sup.toFixed(dec)
-: +(sE*(1-shortStopDec*7.0)).toFixed(dec);
+const taSup=ta.support||0;
+const sTP3=taSup>0&&taSup<sTP2?+taSup.toFixed(dec):+(sE*(1-shortStopDec*7.0)).toFixed(dec);
 const sRew=(sE-sTP1)/sE*100;
 const sRR=sRew/sRisk;
 const levAdjustedLong=activeLev>1&&atrStopLong>maxStopDec;
