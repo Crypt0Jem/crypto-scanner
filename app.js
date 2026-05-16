@@ -15,6 +15,7 @@ const TF_BI={'1d':'1d','4h':'4h','1h':'1h','15m':'15m'};
 let activeCoin='BTC',activeTF='1d',entryMode='optimal',activeLev=50,activeMode='swing';
 let mktData={},klCache={},aiCache={};
 let bybitWS = null;
+let liqZones = null;
 let bybitLiqQueue = [];
 let bybitTickerCache = {};
 let wsReconnectAttempts = 0;
@@ -842,7 +843,7 @@ const optimalShort=resistEntry>price ? Math.min(resistEntry,rallyEntry) : rallyE
 const isOpt=entryMode==='optimal';
 return{long:isOpt?optimalLong:price,short:isOpt?optimalShort:price,atr,pullbackPct:((price-(isOpt?optimalLong:price))/price*100),rallyPct:(((isOpt?optimalShort:price)-price)/price*100)};
 }
-function calcSetups(entries,dec,ta){
+function calcSetups(entries,dec,ta,lz){
 const{long:lE,short:sE,atr}=entries;
 const mmr=activeLev>=100?0.005:activeLev>=25?0.004:0.003;
 const imr=1/activeLev;
@@ -856,8 +857,8 @@ const lSL=+(lE*(1-longStopDec)).toFixed(dec);
 const lRisk=longStopDec*100;
 const lEma20 = ta&&ta.ema20 ? ta.ema20 : 0;
 const lResist = ta&&ta.resistance ? ta.resistance : 0;
-const lLiqAbove = liqZones&&liqZones.topShortLiq
-? (liqZones.topShortLiq.filter(function(z){return z.price>lE;}).sort(function(a,b){return a.price-b.price;})[0]||{}).price||0
+const lLiqAbove = lz&&lz.topShortLiq
+? (lz.topShortLiq.filter(function(z){return z.price>lE;}).sort(function(a,b){return a.price-b.price;})[0]||{}).price||0
 : 0;
 const lTP1raw = lEma20>lE ? lEma20 : lE*1.05;
 const lTP1 = +lTP1raw.toFixed(dec);
@@ -871,8 +872,8 @@ const sSL=+(sE*(1+shortStopDec)).toFixed(dec);
 const sRisk=shortStopDec*100;
 const sEma20 = ta&&ta.ema20 ? ta.ema20 : 0;
 const sSupport = ta&&ta.support ? ta.support : 0;
-const sLiqBelow = liqZones&&liqZones.topLongLiq
-? (liqZones.topLongLiq.filter(function(z){return z.price<sE;}).sort(function(a,b){return b.price-a.price;})[0]||{}).price||0
+const sLiqBelow = lz&&lz.topLongLiq
+? (lz.topLongLiq.filter(function(z){return z.price<sE;}).sort(function(a,b){return b.price-a.price;})[0]||{}).price||0
 : 0;
 const sTP1raw = sEma20>0&&sEma20<sE ? sEma20 : sE*0.95;
 const sTP1 = +sTP1raw.toFixed(dec);
@@ -2289,12 +2290,12 @@ const primaryDir = scShort > scLong ? 'short' : 'long';
 const sc = scoreSignal(coin,ta,mtfData,klines,primaryDir);
 window._lastSignalDir = primaryDir;
 const isPrime = sc>=8 && (window._lastBonusCount||0)>=4;
-let liqZones=null;
+liqZones=null;
 try{ liqZones=calcLiqZones(d.price,ta.atr||d.price*0.02,d.oi,d.funding,d.oiNotional,klines,dec); }
 catch(e){ console.warn('LiqZones failed:',e); }
 const v=verdictOf(sc,ta,window._lastCvdData);
 const entries=calcEntries(d.price,ta,dec);
-const freshSetup=calcSetups(entries,dec,ta);
+const freshSetup=calcSetups(entries,dec,ta,liqZones);
 let setup=freshSetup;
 let lockedSig=null;
 if(activeMode==='swing'){
