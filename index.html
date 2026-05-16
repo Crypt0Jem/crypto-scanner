@@ -44,8 +44,6 @@ body{min-height:100vh}
 .cbs{background:var(--red-bg);color:var(--red)}
 .cbn{color:var(--text3)}
 .cbw{background:var(--amber-bg);color:var(--amber)}
-.cbp{background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);animation:prime-pulse 2s ease-in-out infinite}
-@keyframes prime-pulse{0%,100%{box-shadow:0 0 0 0 rgba(167,139,250,0)}50%{box-shadow:0 0 6px 2px rgba(167,139,250,0.25)}}
 .sb-coins{padding:0;flex:1}
 .rbtn{margin:6px 10px 0;padding:8px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:var(--mono);font-size:10px;cursor:pointer;text-align:center;transition:all .1s;width:calc(100% - 20px)}
 .rbtn:hover{border-color:var(--border2);color:var(--text2)}
@@ -157,6 +155,7 @@ body{min-height:100vh}
 .pred-track{height:3px;background:var(--border);border-radius:2px;flex:1;margin:0 10px}
 .pred-fill-g{height:100%;background:var(--green);border-radius:2px}
 .pred-fill-r{height:100%;background:var(--red);border-radius:2px}
+.pred-levels{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
 .pred-lvl{background:rgba(255,255,255,.02);border-radius:5px;padding:8px 10px;text-align:center;border:1px solid var(--border)}
 .pred-lvl-label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono);color:var(--text3);margin-bottom:3px}
 .pred-lvl-price{font-family:var(--mono);font-size:13px;font-weight:500}
@@ -182,7 +181,14 @@ body{min-height:100vh}
 .ois{font-size:9px;color:var(--text3);font-family:var(--mono);margin-top:2px}
 
 /* Predictive model */
+.prow{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);gap:10px;flex-wrap:wrap}
+.pk{font-size:11px;color:var(--text2);font-family:var(--mono)}
+.pright{display:flex;align-items:center;gap:8px}
+.pval{font-family:var(--mono);font-size:13px;font-weight:500}
+.pbar-w{width:80px;height:3px;background:rgba(255,255,255,0.08);border-radius:2px}
 .pbar{height:100%;border-radius:2px}
+.ppct{font-size:10px;color:var(--text3);font-family:var(--mono);min-width:30px;text-align:right}
+.pred-levels{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
 
 /* Leverage card */
 .lev-card{background:transparent;border:1px solid var(--border);border-radius:8px;padding:14px}
@@ -193,9 +199,15 @@ body{min-height:100vh}
 .liq-warning{font-size:10px;font-family:var(--mono);line-height:1.6;padding:6px 0}
 
 /* CVD chart */
-#cvd-chart{width:100%;height:120px}
+.cvd-canvas-wrap{width:100%;height:120px;background:var(--bg3);border-radius:6px;overflow:hidden}
+#cvd-chart{width:100%;height:100%}
 .cvd-wrap{width:100%;height:120px;background:var(--bg3);border-radius:6px;overflow:hidden;margin-top:8px}
 
+.chart-canvas-wrap{position:relative;width:100%;height:360px;background:var(--bg3);border-radius:6px;overflow:hidden}
+#custom-chart{width:100%;height:100%}
+.chart-legend{display:flex;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.cl-item{display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text3);font-family:var(--mono)}
+.cl-line{width:14px;height:2px;border-radius:1px}
 
 .spin{width:12px;height:12px;border:1.5px solid rgba(255,255,255,.08);border-top-color:var(--green);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -230,6 +242,7 @@ body{min-height:100vh}
   .metrics-grid{grid-template-columns:repeat(3,1fr)}
   .ai-2col{grid-template-columns:1fr}
   .oi-grid{grid-template-columns:1fr 1fr}
+  .pred-levels{grid-template-columns:1fr 1fr}
   .pattern-levels{grid-template-columns:1fr}
   .mtf-grid{grid-template-columns:repeat(2,1fr)}
 }
