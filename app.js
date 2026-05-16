@@ -2210,72 +2210,86 @@ var bb = window._lastBBResult || {};
 var bos = window._lastBOS || {};
 var vw = window._lastVWAP || {};
 var rd = window._lastRSIDiv || {};
-var bd = window._lastScoreBreakdown || {};
+var bd = window._lastScoreBreakdown|| {};
 var oid = window._lastOIDelta || {};
-var _fd2= window._lastFundingDelta || {};
-var bonuses = [
-{ label:'BB squeeze',
-on: !!(bb.squeeze && bb.breakoutAligned),
-sub: bb.squeeze ? (bb.breakoutAligned ? 'Breakout aligned' : 'Squeeze, no breakout yet') : 'No squeeze',
+var fd2 = window._lastFundingDelta || {};
+function makeSignals(dir) {
+var isLong = dir === 'long';
+return [
+{ label: 'BB squeeze',
+on: !!(bb.squeeze && bb.breakoutAligned && (isLong ? ta.trend==='bullish'||ta.trend==='mild-bullish' : ta.trend==='bearish'||ta.trend==='mild-bearish')),
+sub: bb.squeeze ? (bb.breakoutAligned ? 'Squeeze breakout '+(isLong?'bullish':'bearish') : 'Squeeze — no breakout') : 'No squeeze',
 detail: bb.bandwidth ? 'BW '+bb.bandwidth.toFixed(4) : '' },
-{ label:'VWAP reclaim',
-on: !!vw.reclaim,
-sub: vw.reclaim ? 'Reclaimed ('+vw.type+')' : (vw.vwap ? 'VWAP $'+fn(vw.vwap,dec) : 'No data'),
+{ label: 'VWAP reclaim',
+on: !!(vw.reclaim && (isLong ? vw.type==='bullish' : vw.type==='bearish')),
+sub: vw.reclaim ? 'Reclaimed ('+(isLong?'bullish':'bearish')+')' : (vw.vwap ? 'VWAP $'+fn(vw.vwap,dec) : 'No data'),
 detail: '' },
-{ label:'Struct break',
-on: !!bos.bos,
-sub: bos.bos ? 'BOS '+bos.type+' @ $'+fn(bos.level,dec) : 'No break yet',
+{ label: 'Struct break',
+on: !!(bos.bos && (isLong ? bos.type==='bullish' : bos.type==='bearish')),
+sub: bos.bos ? 'BOS '+bos.type : 'No break yet',
 detail: bos.swingHigh ? 'H:$'+fn(bos.swingHigh,dec)+' L:$'+fn(bos.swingLow,dec) : '' },
-{ label:'RSI divergence',
-on: !!rd.divergence,
+{ label: 'RSI divergence',
+on: !!(rd.divergence && (isLong ? rd.divergence==='bullish' : rd.divergence==='bearish')),
 sub: rd.divergence ? rd.label : 'No divergence',
 detail: rd.divergence ? rd.desc : '' },
-{ label:'POC proximity',
+{ label: 'POC proximity',
 on: (bd.poc||0)>0,
 sub: (bd.poc||0)>0 ? 'At POC $'+fn(ta.poc,dec) : 'Away from POC',
 detail: ta.poc ? '$'+fn(ta.poc,dec) : '' },
-{ label:'OI expanding',
-on: !!(oid.aligned),
-sub: oid.bullishConfirm ? 'New longs entering — bull confirmed'
-: oid.bearishConfirm ? 'New shorts entering — bear confirmed'
-: oid.expanding ? 'Expanding (direction unclear)'
-: oid.changePct < 0 ? 'OI contracting' : 'OI flat',
-detail: oid.changePct !== undefined ? (oid.changePct >= 0 ? '+' : '')+oid.changePct+'% over 5 periods' : '' },
-{ label:'Funding flip',
-on: !!(_fd2.flipping || _fd2.accelerating),
-sub: _fd2.flipping ? (_fd2.direction==='bullish' ? 'Flipped bullish ⚡' : 'Flipped bearish ⚡')
-: _fd2.accelerating ? (_fd2.direction==='bullish' ? 'Accelerating bullish' : 'Accelerating bearish')
-: (_fd2.direction==='bullish' ? 'Positive — stable' : _fd2.direction==='bearish' ? 'Negative — stable' : 'Neutral'),
-detail: _fd2.latest !== undefined ? 'Latest: '+(_fd2.latest >= 0 ? '+' : '')+(_fd2.latest*1).toFixed(4)+'%' : '' }
+{ label: isLong ? 'OI expanding' : 'OI contracting',
+on: isLong ? !!(oid.bullishConfirm||oid.aligned) : !!(oid.bearishConfirm),
+sub: isLong
+? (oid.bullishConfirm ? 'New longs entering — bull co...' : oid.expanding ? 'Expanding unclear' : 'OI not confirming')
+: (oid.bearishConfirm ? 'New shorts entering — bear co...' : oid.changePct<0 ? 'OI contracting' : 'OI not confirming'),
+detail: oid.changePct !== undefined ? (oid.changePct>=0?'+':'')+oid.changePct+'% over 5 periods' : '' },
+{ label: 'Funding flip',
+on: !!(fd2.flipping||fd2.accelerating) && (isLong ? fd2.direction==='bullish' : fd2.direction==='bearish'),
+sub: fd2.flipping ? (fd2.direction==='bullish'?'Flipped bullish ⚡':'Flipped bearish ⚡')
+: fd2.accelerating ? (fd2.direction==='bullish'?'Accelerating bull':'Accelerating bear')
+: (fd2.direction==='bullish'?'Positive — stable':fd2.direction==='bearish'?'Negative — stable':'Neutral'),
+detail: fd2.latest !== undefined ? 'Latest: '+(fd2.latest>=0?'+':'')+(fd2.latest*1).toFixed(4)+'%' : '' }
 ];
-var active = bonuses.filter(function(b){return b.on;}).length;
-var hdrCol = active>=4?'var(--purple)':active>=1?'var(--green)':'var(--text3)';
-var items = bonuses.map(function(b){
-var col = b.on ? 'var(--green)' : 'var(--text3)';
-var dot = b.on ? '\u25cf' : '\u25cb';
-return '<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:8px">'
-+'<span style="color:'+col+';font-size:12px;flex-shrink:0;margin-top:1px">'+dot+'</span>'
-+'<div style="flex:1;min-width:0">'
-+'<div style="font-size:11px;font-family:var(--mono);color:'+col+';font-weight:'+(b.on?600:400)+'">'+b.label+'</div>'
-+'<div style="font-size:10px;color:var(--text3);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+b.sub+'</div>'
-+(b.detail&&!b.on ? '<div style="font-size:9px;color:rgba(255,255,255,.25);font-family:var(--mono)">'+b.detail+'</div>' : '')
-+(b.detail&&b.on ? '<div style="font-size:9px;color:rgba(0,208,132,.5);font-family:var(--mono)">'+b.detail+'</div>' : '')
-+'</div>'
+}
+function renderCol(signals, dir) {
+var active = signals.filter(function(s){return s.on;}).length;
+var isLong = dir === 'long';
+var hdrCol = active>=3 ? (isLong?'var(--green)':'var(--red)') : active>=1 ? 'var(--amber)' : 'var(--text3)';
+var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
++'<span style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono)">'
++(isLong?'🟢 Long':'🔴 Short')+' signals — '+active+'/7</span>'
++(active>=4?'<span style="font-size:9px;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:3px;padding:1px 6px">Prime</span>':'')
 +'</div>';
+var items = signals.map(function(s){
+var col = s.on ? (isLong?'var(--green)':'var(--red)') : 'var(--text3)';
+var dot = s.on ? (isLong?'●':'●') : '○';
+return '<div style="padding:5px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:6px">'
++'<span style="color:'+col+';font-size:11px;flex-shrink:0">'+dot+'</span>'
++'<div style="flex:1;min-width:0">'
++'<div style="font-size:10px;font-family:var(--mono);color:'+col+';font-weight:'+(s.on?600:400)+'">'+s.label+'</div>'
++'<div style="font-size:9px;color:var(--text3);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+s.sub+'</div>'
++(s.detail&&s.on?'<div style="font-size:9px;color:'+(isLong?'rgba(0,208,132,.5)':'rgba(255,77,77,.5)')+';font-family:var(--mono)">'+s.detail+'</div>':'')
++'</div></div>';
 }).join('');
+return header + items;
+}
+var longSigs = makeSignals('long');
+var shortSigs = makeSignals('short');
+var longActive = longSigs.filter(function(s){return s.on;}).length;
+var shortActive = shortSigs.filter(function(s){return s.on;}).length;
 var confirmed = window._lastCandleConfirmed !== false;
 var progress = klines ? candleProgress(klines, activeTF) : 100;
 var candleNote = !confirmed
-? '<span style="background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.35);border-radius:3px;padding:1px 7px;font-size:9px">'
-+'⚠ Candle forming — '+progress+'% complete — signals update on close</span>'
+? '<span style="background:rgba(245,166,35,0.15);color:var(--amber);border:1px solid rgba(245,166,35,0.35);border-radius:3px;padding:1px 7px;font-size:9px">⚠ Candle forming — '+progress+'% complete</span>'
 : '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">✓ Closed candle</span>';
 return '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">'
-+'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:'+hdrCol+';font-family:var(--mono);margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-+'<span>Bonus confluence — '+active+'/7 active</span>'
++'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">'
++'<span style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono)">Bonus confluence</span>'
 +candleNote
-+(active>=4 ? '<span style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.35);border-radius:3px;padding:1px 7px;font-size:9px">🔥 Prime threshold met</span>' : '')
 +'</div>'
-+'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 20px">'+items+'</div>'
++'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'
++'<div style="background:rgba(0,212,132,0.04);border:1px solid rgba(0,212,132,0.1);border-radius:6px;padding:10px">'+renderCol(longSigs,'long')+'</div>'
++'<div style="background:rgba(255,77,77,0.04);border:1px solid rgba(255,77,77,0.1);border-radius:6px;padding:10px">'+renderCol(shortSigs,'short')+'</div>'
++'</div>'
 +'</div>';
 }
 async function renderDetail(coin,klines,mtfData){
