@@ -2620,6 +2620,17 @@ renderScanBody();
 pendingAIContext = {coin, ta, sc, setup, klines, mtfData, liqZones, cvdData};
 window._lastCvdData = cvdData;
 window._lastTA = ta;
+try {
+var macroSnap = {
+coin:activeCoin, tf:activeTF, price:d.price,
+liqZones:liqZones,
+ta:{rsi:ta.rsi,trend:ta.trend,ema20:ta.ema20,support:ta.support,resistance:ta.resistance,poc:ta.poc,atr:ta.atr},
+funding:d.funding, fgValue:d.fgValue, oi:d.oiNotional,
+sc:sc, scLong:window._scLong||0, scShort:window._scShort||0,
+timestamp:Date.now()
+};
+localStorage.setItem('macroData_'+activeCoin, JSON.stringify(macroSnap));
+} catch(e) {}
 if(liqZones){
 var obCluster = (liqZones.longLiqZones||[])[0]||{price:d.price};
 fetchOrderBook(bybitSym, obCluster.price).then(function(ob){ window._lastOB=ob; }).catch(function(){});
