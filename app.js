@@ -2149,7 +2149,8 @@ return rows;
 if(!setup||sc<5) return '';
 var ls = lockedSig ? lockedSig.lockedSetup : null;
 var ais = window._lastAISetup || null;
-var wv = (sum && sum.waitLevel) ? sum.waitLevel.val : null;
+var _sum = window._lastSummaryData || {};
+var wv = (_sum && _sum.waitLevel) ? _sum.waitLevel.val : null;
 var e = isLong
 ? (ais && ais.longEntry ? ais.longEntry : wv ? wv : ls ? ls.entry : setup.lE)
 : (ais && ais.shortEntry ? ais.shortEntry : wv ? wv : ls ? ls.shortEntry||setup.sE : setup.sE);
