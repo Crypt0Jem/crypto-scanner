@@ -2550,6 +2550,22 @@ ${fundingMom.momentum==='flipping'?'Flipping direction':fundingMom.direction==='
 <div class="metric"><div class="mlbl">Volume POC</div><div class="mval vb">$${fn(ta.poc,dec>2?2:dec)}</div><div class="msub">Highest volume</div></div>
 </div>
 ${renderBonusRow(ta, dec, klines)}
+<!-- CVD chart inside Technical Indicators -->
+<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:var(--text3);font-family:var(--mono)">Order flow — CVD (Cumulative Volume Delta)</span>
+<span style="font-size:9px;color:${cvdData.trend==='bullish'?'var(--green)':cvdData.trend==='bearish'?'var(--red)':'var(--text2)'};font-family:var(--mono);font-weight:600">${cvdData.trend.toUpperCase()}</span>
+</div>
+${cvdData.divergence
+? `<span style="font-size:9px;padding:2px 8px;border-radius:3px;font-family:var(--mono);background:${cvdData.divergence.type==='bearish'?'rgba(255,77,77,.2)':'rgba(0,208,132,.2)'};color:${cvdData.divergence.type==='bearish'?'var(--red)':'var(--green)'}">${cvdData.divergence.label}</span>`
+: '<span style="font-size:9px;color:var(--text3);font-family:var(--mono)">No divergence</span>'
+}
+</div>
+<div class="cvd-canvas-wrap">
+<canvas id="cvd-chart" role="img" aria-label="CVD order flow delta chart"></canvas>
+</div>
+</div>
 </div>
 <!-- OI -->
 <div class="card">
@@ -3542,7 +3558,7 @@ el.innerHTML = '$' + fmt2(val)
 + '<span style="font-size:9px;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:var(--mono)">AI</span>';
 }
 var fmt2 = function(v){ return fn(v, dec); };
-var curPrice = d.price;
+var curPrice = (mktData[coin]||{}).price || 0;
 var validLongEntry = rPe.longEntry && rPe.longEntry < curPrice * 1.02;
 var validShortEntry = rPe.shortEntry && rPe.shortEntry > curPrice * 0.98;
 if(validLongEntry) setAIVal('l-entry', rPe.longEntry, fmt2);
