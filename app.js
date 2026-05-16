@@ -856,12 +856,18 @@ const lSL=+(lE*(1-longStopDec)).toFixed(dec);
 const lRisk=longStopDec*100;
 const lTP1=+(lE*(1+longStopDec*2.5)).toFixed(dec);
 const lTP2=+(lE*(1+longStopDec*4.0)).toFixed(dec);
+const lTP3=ta.resistance&&ta.resistance>lTP2
+? +ta.resistance.toFixed(dec)
+: +(lE*(1+longStopDec*7.0)).toFixed(dec);
 const lRew=(lTP1-lE)/lE*100;
 const lRR=lRew/lRisk;
 const sSL=+(sE*(1+shortStopDec)).toFixed(dec);
 const sRisk=shortStopDec*100;
 const sTP1=+(sE*(1-shortStopDec*2.5)).toFixed(dec);
 const sTP2=+(sE*(1-shortStopDec*4.0)).toFixed(dec);
+const sTP3=ta.support&&ta.support<sTP2
+? +ta.support.toFixed(dec)
+: +(sE*(1-shortStopDec*7.0)).toFixed(dec);
 const sRew=(sE-sTP1)/sE*100;
 const sRR=sRew/sRisk;
 const levAdjustedLong=activeLev>1&&atrStopLong>maxStopDec;
@@ -870,7 +876,7 @@ const takerFee=0.0005;
 const liqLong = +(lE*(1-imr+mmr+takerFee)).toFixed(dec);
 const liqShort = +(sE*(1+imr-mmr-takerFee)).toFixed(dec);
 const liqDistPct = (imr-mmr)*100;
-return{lE,lSL,lTP1,lTP2,lRisk,lRew,lRR,sE,sSL,sTP1,sTP2,sRisk,sRew,sRR,
+return{lE,lSL,lTP1,lTP2,lTP3,lRisk,lRew,lRR,sE,sSL,sTP1,sTP2,sTP3,sRisk,sRew,sRR,
 levAdjustedLong,levAdjustedShort,
 maxStopPct:maxStopDec*100,
 atrStopLongPct:atrStopLong*100,
@@ -2164,6 +2170,7 @@ var t1 = isLong
 var t2 = isLong
 ? (ais && ais.longTP2 ? ais.longTP2 : setup.lTP2||null)
 : (ais && ais.shortTP2 ? ais.shortTP2 : setup.sTP2||null);
+var t3 = isLong ? (setup.lTP3||null) : (setup.sTP3||null);
 var rr = (e&&sl&&t1) ? (Math.abs(t1-e)/Math.abs(e-sl)).toFixed(1)+'R' : '—';
 var px = function(n){ return n?'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}):'—'; };
 return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap">'
@@ -2171,6 +2178,7 @@ return '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--b
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">Stop </span><span style="color:var(--red);font-weight:600">'+px(sl)+'</span></div>'
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">TP1 </span><span style="color:var(--green);font-weight:600">'+px(t1)+'</span></div>'
 +(t2?'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">TP2 </span><span style="color:var(--green);font-weight:600">'+px(t2)+'</span></div>':'')
++(t3?'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">TP3 </span><span style="color:rgba(0,208,132,0.6);font-weight:600">'+px(t3)+'</span></div>':'')
 +'<div style="font-size:10px;font-family:var(--mono)"><span style="color:var(--text3)">R:R </span><span style="color:var(--text2)">'+rr+'</span></div>'
 +'</div>';
 })()
@@ -2449,6 +2457,7 @@ ${setup.levAdjustedLong
 <div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqLong,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
 <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="l-tp1">$${fn(setup.lTP1,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.lRew.toFixed(3)}%</span></span></div>
 <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="l-tp2">$${fn(setup.lTP2,dec)}</span></div>
+<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="l-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.lTP3,dec)}</span></div>
 <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.lRR.toFixed(2)}:1 <span class="rrtag ${setup.lRR>=1.5?'rrg':'rrr'}">${setup.lRR>=1.5?'good':'weak'}</span></span></div>
 <div class="srow"><span class="skey">ATR volatility</span><span class="sval">${safeFormatATR(ta.atr, d.price)}</span></div>
 <div class="srow" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
@@ -2485,6 +2494,7 @@ ${setup.levAdjustedShort
 <div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqShort,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
 <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="s-tp1">$${fn(setup.sTP1,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.sRew.toFixed(3)}%</span></span></div>
 <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="s-tp2">$${fn(setup.sTP2,dec)}</span></div>
+<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="s-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.sTP3,dec)}</span></div>
 <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.sRR.toFixed(2)}:1 <span class="rrtag ${setup.sRR>=1.5?'rrg':'rrr'}">${setup.sRR>=1.5?'good':'weak'}</span></span></div>
 <div class="srow"><span class="skey">ATR volatility</span><span class="sval">${safeFormatATR(ta.atr, d.price)}</span></div>
 <div class="srow" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
