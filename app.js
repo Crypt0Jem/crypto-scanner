@@ -2317,10 +2317,10 @@ const sRisk = maxSD*100;
 setup={...freshSetup,
 lE:ls.entry,
 lSL:lSLlive, lRisk,
-lTP1:ls.takeProfits[0], lTP2:ls.takeProfits[1], lTP3:freshSetup.lTP3,
+lTP1:freshSetup.lTP1, lTP2:freshSetup.lTP2, lTP3:freshSetup.lTP3,
 sE:ls.shortEntry||freshSetup.sE,
 sSL:sSLlive, sRisk,
-sTP1:ls.shortTPs?.[0]||freshSetup.sTP1, sTP2:ls.shortTPs?.[1]||freshSetup.sTP2, sTP3:freshSetup.sTP3,
+sTP1:freshSetup.sTP1, sTP2:freshSetup.sTP2, sTP3:freshSetup.sTP3,
 liqLong:liqLongLive, liqShort:liqShortLive,
 liqDistPct,
 levAdjustedLong:true, levAdjustedShort:true,
@@ -3542,13 +3542,18 @@ el.innerHTML = '$' + fmt2(val)
 + '<span style="font-size:9px;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:var(--mono)">AI</span>';
 }
 var fmt2 = function(v){ return fn(v, dec); };
-if(pe.longEntry) setAIVal('l-entry', rPe.longEntry, fmt2);
-if(pe.longTP1) setAIVal('l-tp1', rPe.longTP1, fmt2);
-if(pe.longTP2) setAIVal('l-tp2', rPe.longTP2, fmt2);
-if(pe.shortEntry) setAIVal('s-entry', rPe.shortEntry, fmt2);
-if(pe.shortTP1) setAIVal('s-tp1', rPe.shortTP1, fmt2);
-if(pe.shortTP2) setAIVal('s-tp2', rPe.shortTP2, fmt2);
-window._lastAISetup = rPe;
+var curPrice = d.price;
+var validLongEntry = rPe.longEntry && rPe.longEntry < curPrice * 1.02;
+var validShortEntry = rPe.shortEntry && rPe.shortEntry > curPrice * 0.98;
+if(validLongEntry) setAIVal('l-entry', rPe.longEntry, fmt2);
+if(validShortEntry) setAIVal('s-entry', rPe.shortEntry, fmt2);
+window._lastAISetup = {
+longEntry: validLongEntry ? rPe.longEntry : null,
+shortEntry: validShortEntry ? rPe.shortEntry : null,
+longStop: null, shortStop: null,
+longTP1: null, longTP2: null,
+shortTP1: null, shortTP2: null
+};
 if(patternEl){
 var patternLevelsHtml = '';
 if(pe.longEntry||pe.shortEntry){
