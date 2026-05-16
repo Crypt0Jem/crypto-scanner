@@ -199,8 +199,7 @@ body{min-height:100vh}
 .liq-warning{font-size:10px;font-family:var(--mono);line-height:1.6;padding:6px 0}
 
 /* CVD chart */
-.cvd-canvas-wrap{width:100%;height:120px;background:var(--bg3);border-radius:6px;overflow:hidden}
-#cvd-chart{width:100%;height:100%}
+#cvd-chart{width:100%;height:120px}
 .cvd-wrap{width:100%;height:120px;background:var(--bg3);border-radius:6px;overflow:hidden;margin-top:8px}
 
 .chart-canvas-wrap{position:relative;width:100%;height:360px;background:var(--bg3);border-radius:6px;overflow:hidden}
@@ -287,6 +286,7 @@ body{min-height:100vh}
   </div>
   <button class="rbtn" id="rbtn" onclick="init()">↻ Refresh all data</button>
   <button class="rbtn" id="trade-log-btn" onclick="showTradeLog()" style="margin-top:4px;border-color:rgba(0,229,187,0.2);color:var(--green)">📊 Trade Log</button>
+  <button class="rbtn" onclick="window.open('macro.html','_blank')" style="margin-top:4px;border-color:rgba(167,139,250,0.3);color:#a78bfa">🔭 Macro & Cascade</button>
   <div id="session-pnl-panel" style="margin:6px 10px 0;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;display:none"></div>
   <div class="last-upd" id="last-upd">—</div>
   <div class="last-upd" id="ws-status" style="margin-top:3px"></div>
