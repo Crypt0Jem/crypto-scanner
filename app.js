@@ -2302,10 +2302,10 @@ const sRisk = maxSD*100;
 setup={...freshSetup,
 lE:ls.entry,
 lSL:lSLlive, lRisk,
-lTP1:ls.takeProfits[0], lTP2:ls.takeProfits[1],
+lTP1:ls.takeProfits[0], lTP2:ls.takeProfits[1], lTP3:freshSetup.lTP3,
 sE:ls.shortEntry||freshSetup.sE,
 sSL:sSLlive, sRisk,
-sTP1:ls.shortTPs?.[0]||freshSetup.sTP1, sTP2:ls.shortTPs?.[1]||freshSetup.sTP2,
+sTP1:ls.shortTPs?.[0]||freshSetup.sTP1, sTP2:ls.shortTPs?.[1]||freshSetup.sTP2, sTP3:freshSetup.sTP3,
 liqLong:liqLongLive, liqShort:liqShortLive,
 liqDistPct,
 levAdjustedLong:true, levAdjustedShort:true,
@@ -2455,7 +2455,7 @@ ${setup.levAdjustedLong
 <div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqLong,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
 <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="l-tp1">$${fn(setup.lTP1,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.lRew.toFixed(3)}%</span></span></div>
 <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="l-tp2">$${fn(setup.lTP2,dec)}</span></div>
-<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="l-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.lTP3,dec)}</span></div>
+${setup.lTP3?`<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="l-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.lTP3,dec)}</span></div>`:''}
 <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.lRR.toFixed(2)}:1 <span class="rrtag ${setup.lRR>=1.5?'rrg':'rrr'}">${setup.lRR>=1.5?'good':'weak'}</span></span></div>
 <div class="srow"><span class="skey">ATR volatility</span><span class="sval">${safeFormatATR(ta.atr, d.price)}</span></div>
 <div class="srow" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
@@ -2492,7 +2492,7 @@ ${setup.levAdjustedShort
 <div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqShort,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
 <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="s-tp1">$${fn(setup.sTP1,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.sRew.toFixed(3)}%</span></span></div>
 <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="s-tp2">$${fn(setup.sTP2,dec)}</span></div>
-<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="s-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.sTP3,dec)}</span></div>
+${setup.sTP3?`<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="s-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.sTP3,dec)}</span></div>`:''}
 <div class="srow"><span class="skey">R:R ratio</span><span class="sval">${setup.sRR.toFixed(2)}:1 <span class="rrtag ${setup.sRR>=1.5?'rrg':'rrr'}">${setup.sRR>=1.5?'good':'weak'}</span></span></div>
 <div class="srow"><span class="skey">ATR volatility</span><span class="sval">${safeFormatATR(ta.atr, d.price)}</span></div>
 <div class="srow" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
