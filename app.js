@@ -2465,7 +2465,7 @@ ${isLocked?'<button onclick="invalidateSignal(\''+coin+'\',\''+activeTF+'\',\'di
 <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb" id="l-entry">$${fn(setup.lE,dec)}</span></div>
 <div class="srow" style="${setup.levAdjustedLong?'background:rgba(74,158,255,0.05);border-radius:6px;padding:6px 4px;margin-bottom:2px':''}">
 <span class="skey">Stop loss</span>
-<span class="sval vr">
+<span class="sval vr" id="l-stop-val">
 $${fn(setup.lSL,dec)}
 <span style="font-size:11px;color:var(--text2);margin-left:3px">-${setup.lRisk.toFixed(3)}%</span>
 ${setup.levAdjustedLong
@@ -2475,7 +2475,7 @@ ${setup.levAdjustedLong
 : ''}
 </span>
 </div>
-<div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqLong,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
+<div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" id="l-liq-val" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqLong,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
 <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="l-tp1">$${fn(setup.lTP1,dec)} <span style="font-size:11px;color:var(--text2)">+${setup.lRew.toFixed(3)}%</span></span></div>
 <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="l-tp2">$${fn(setup.lTP2,dec)}</span></div>
 ${setup.lTP3?`<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="l-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.lTP3,dec)}</span></div>`:''}
@@ -2502,7 +2502,7 @@ ${isLocked&&lockedSig?'<span style="font-size:9px;color:var(--text3);font-family
 <div class="srow"><span class="skey">${entryMode==='optimal'?'Optimal entry':'Entry (market)'}</span><span class="sval vb" id="s-entry">$${fn(setup.sE,dec)}</span></div>
 <div class="srow" style="${setup.levAdjustedShort?'background:rgba(74,158,255,0.05);border-radius:6px;padding:6px 4px;margin-bottom:2px':''}">
 <span class="skey">Stop loss</span>
-<span class="sval vr">
+<span class="sval vr" id="s-stop-val">
 $${fn(setup.sSL,dec)}
 <span style="font-size:11px;color:var(--text2);margin-left:3px">+${setup.sRisk.toFixed(3)}%</span>
 ${setup.levAdjustedShort
@@ -2512,7 +2512,7 @@ ${setup.levAdjustedShort
 : ''}
 </span>
 </div>
-<div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqShort,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
+<div class="srow"><span class="skey">Liq price @ ${activeLev}x</span><span class="sval" id="s-liq-val" style="color:rgba(255,77,77,0.7);font-family:var(--mono)">$${fn(setup.liqShort,dec)} <span style="font-size:10px;color:var(--text3)">(${setup.liqDistPct.toFixed(3)}% from entry)</span></span></div>
 <div class="srow"><span class="skey">Take profit 1</span><span class="sval vg" id="s-tp1">$${fn(setup.sTP1,dec)} <span style="font-size:11px;color:var(--text2)">-${setup.sRew.toFixed(3)}%</span></span></div>
 <div class="srow"><span class="skey">Take profit 2</span><span class="sval vg" id="s-tp2">$${fn(setup.sTP2,dec)}</span></div>
 ${setup.sTP3?`<div class="srow"><span class="skey">TP3 (swing)</span><span class="sval vg" id="s-tp3" style="color:rgba(0,208,132,0.6)">$${fn(setup.sTP3,dec)}</span></div>`:''}
@@ -3567,10 +3567,25 @@ el.innerHTML = '$' + fmt2(val)
 }
 var fmt2 = function(v){ return fn(v, dec); };
 var curPrice = (mktData[coin]||{}).price || 0;
+var maxSD = setup.maxStopPct ? setup.maxStopPct/100 : 0.0096;
 var validLongEntry = rPe.longEntry && rPe.longEntry < curPrice * 1.02;
 var validShortEntry = rPe.shortEntry && rPe.shortEntry > curPrice * 0.98;
-if(validLongEntry) setAIVal('l-entry', rPe.longEntry, fmt2);
-if(validShortEntry) setAIVal('s-entry', rPe.shortEntry, fmt2);
+if(validLongEntry){
+setAIVal('l-entry', rPe.longEntry, fmt2);
+var aiLongStop = +(rPe.longEntry * (1 - maxSD)).toFixed(dec);
+var lStopEl = document.getElementById('l-stop-val');
+var lLiqEl = document.getElementById('l-liq-val');
+if(lStopEl) lStopEl.textContent = '$' + fn(aiLongStop, dec);
+if(lLiqEl) lLiqEl.textContent = '$' + fn(+(rPe.longEntry*(1-0.016)).toFixed(dec), dec);
+}
+if(validShortEntry){
+setAIVal('s-entry', rPe.shortEntry, fmt2);
+var aiShortStop = +(rPe.shortEntry * (1 + maxSD)).toFixed(dec);
+var sStopEl = document.getElementById('s-stop-val');
+var sLiqEl = document.getElementById('s-liq-val');
+if(sStopEl) sStopEl.textContent = '$' + fn(aiShortStop, dec);
+if(sLiqEl) sLiqEl.textContent = '$' + fn(+(rPe.shortEntry*(1+0.016)).toFixed(dec), dec);
+}
 window._lastAISetup = {
 longEntry: validLongEntry ? rPe.longEntry : null,
 shortEntry: validShortEntry ? rPe.shortEntry : null,
