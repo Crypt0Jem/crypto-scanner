@@ -550,14 +550,14 @@ function renderCascade(coin, price, liqZones) {
   let html = '';
 
   // ── UPSIDE ──────────────────────────────────────────────────────────────────
+  // Display order: big projections first (top), then short squeeze nearest price
   html += '<div class="cascade-section">';
   html += '<div class="cascade-header up">▲ Upside cascade & projections</div>';
 
-  // Historical & fib upside (show top 4 most relevant)
-  // Deduplicate: remove entries within 3% of each other, keep most meaningful
+  // Big projections — sorted highest to lowest (furthest target at top)
   const rawUp = [...histUp, ...fibLevels, ...multiples]
     .filter(u => u.price > price * 1.02)
-    .sort((a,b) => a.price - b.price);
+    .sort((a,b) => b.price - a.price); // highest first
   const allUp = [];
   rawUp.forEach(u => {
     if (!allUp.length || Math.abs(u.price - allUp[allUp.length-1].price) / allUp[allUp.length-1].price > 0.03) {
@@ -568,7 +568,6 @@ function renderCascade(coin, price, liqZones) {
 
   allUpSliced.forEach(u => {
     const mult = (u.price / price).toFixed(1);
-    const typeClass = u.type === 'conservative' ? 'green' : u.type === 'moderate' ? 'amber' : u.type === 'aggressive' ? 'red' : 'purple';
     html += `<div class="proj-row ${u.type}">
       <span class="proj-price green">$${fn(u.price, dec)}</span>
       <span class="proj-label">${u.label}</span>
@@ -576,10 +575,11 @@ function renderCascade(coin, price, liqZones) {
     </div>`;
   });
 
-  // Short squeeze cascade (scanner data)
+  // Short squeeze cascade — sorted highest to lowest (furthest squeeze at top, nearest at bottom)
   if (shortLiqs.length > 0) {
     html += '<div style="margin:8px 0 4px;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em">Short squeeze cascade (scanner)</div>';
-    shortLiqs.slice(0, 4).forEach(z => {
+    const sortedShortLiqs = [...shortLiqs].sort((a,b) => b.price - a.price);
+    sortedShortLiqs.slice(0, 4).forEach(z => {
       html += `<div class="cascade-row scanner">
         <span class="crow-arrow" style="color:var(--green)">↑</span>
         <span class="crow-price green">$${fn(z.price, dec)}</span>
