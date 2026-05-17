@@ -1007,7 +1007,7 @@ if (!liq) return '';
 try {
 const fn2 = n => safeFormat(n, dec);
 const biasColor = liq.fundingBias === 'long-heavy' ? 'var(--green)' : liq.fundingBias === 'short-heavy' ? 'var(--red)' : 'var(--amber)';
-const longRows = liq.longLiqZones.slice().reverse().map(z => {
+const longRows = liq.longLiqZones.slice().map(z => {
 const sigBg = z.significance==='high' ? 'rgba(255,77,77,.25)' : z.significance==='medium' ? 'rgba(255,77,77,.12)' : 'rgba(255,77,77,.05)';
 const sigCol = z.significance==='high' ? 'var(--red)' : z.significance==='medium' ? 'rgba(255,120,120,0.9)' : 'var(--text3)';
 return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">'
@@ -1017,7 +1017,7 @@ return '<div style="display:flex;justify-content:space-between;align-items:cente
 + '<span style="font-size:9px;padding:2px 6px;border-radius:3px;background:' + sigBg + ';color:' + sigCol + '">' + z.significance + '</span>'
 + '</div>';
 }).join('');
-const shortRows = liq.shortLiqZones.slice().reverse().map(z => {
+const shortRows = liq.shortLiqZones.slice().map(z => {
 const sigBg = z.significance==='high' ? 'rgba(0,208,132,.25)' : z.significance==='medium' ? 'rgba(0,208,132,.12)' : 'rgba(0,208,132,.05)';
 const sigCol = z.significance==='high' ? 'var(--green)' : z.significance==='medium' ? 'rgba(80,200,150,0.9)' : 'var(--text3)';
 return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">'
