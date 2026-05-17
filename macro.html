@@ -842,6 +842,11 @@ async function fetchPrice() {
     const fgJ = await fgR.json().catch(()=>({data:[{value:50}]}));
     const fg = parseInt((fgJ?.data?.[0]?.value)||50);
     const ticker = j?.result?.list?.[0];
+    if (ticker) {
+      scannerData[activeCoin] = {
+        coin: activeCoin, price: parseFloat(ticker.lastPrice),
+        liqZones: null, ta: null,
+        funding: parseFloat(ticker.fundingRate||0) * 100,
         fgValue: fg, sc: null, timestamp: Date.now()
       };
       render();
