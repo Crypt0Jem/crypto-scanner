@@ -495,15 +495,17 @@ function calcCascadeLevels(coin, price, liqZones) {
   histUp.push({ price: +(meta.ath * 1.5).toFixed(dec), label: 'New ATH +50%', type: 'aggressive' });
   histUp.push({ price: +(meta.ath * 2.5).toFixed(dec), label: 'New ATH +150% (bull cycle)', type: 'aggressive' });
 
-  // Fibonacci upside from lowest known support
-  const base = liqZones && liqZones.longLiqZones
-    ? Math.min(...liqZones.longLiqZones.map(z => z.price), meta.ath * 0.15)
-    : meta.ath * 0.20;
+
+  // Fibonacci extensions: from all-time bottom to ATH, projected beyond ATH
+  const fibBase2 = meta.allTimeBottom || meta.bottom2022 || meta.bottom2020 || +(meta.ath * 0.10);
+  const fibRange = meta.ath - fibBase2;
   const fibLevels = [
-    { price: +(base + (price - base) * 1.618).toFixed(dec), label: 'Fib 1.618 extension', type: 'conservative' },
-    { price: +(base + (price - base) * 2.618).toFixed(dec), label: 'Fib 2.618 extension', type: 'moderate' },
-    { price: +(base + (price - base) * 4.236).toFixed(dec), label: 'Fib 4.236 extension', type: 'aggressive' },
-  ].filter(f => f.price > price);
+    { price: +(meta.ath + fibRange * 0.236).toFixed(dec), label: 'Fib 1.236 (ATH +23.6%)', type: 'conservative' },
+    { price: +(meta.ath + fibRange * 0.382).toFixed(dec), label: 'Fib 1.382 (ATH +38.2%)', type: 'conservative' },
+    { price: +(meta.ath + fibRange * 0.618).toFixed(dec), label: 'Fib 1.618 extension',     type: 'moderate' },
+    { price: +(meta.ath + fibRange * 1.0).toFixed(dec),   label: 'Fib 2.0 extension',       type: 'aggressive' },
+    { price: +(meta.ath + fibRange * 1.618).toFixed(dec), label: 'Fib 2.618 extension',     type: 'aggressive' },
+  ].filter(f => f.price > price * 1.05);
 
   // Altcoin multiplier projections from current price
   const multiples = [
@@ -832,15 +834,15 @@ async function fetchPrice() {
 
   try {
     const sym = COINS[activeCoin].sym;
-    const r = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${sym}`);
+    const [r, fgR] = await Promise.all([
+      fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${sym}`),
+      fetch("https://api.alternative.me/fng/?limit=1")
+    ]);
     const j = await r.json();
+    const fgJ = await fgR.json().catch(()=>({data:[{value:50}]}));
+    const fg = parseInt((fgJ?.data?.[0]?.value)||50);
     const ticker = j?.result?.list?.[0];
-    if (ticker) {
-      scannerData[activeCoin] = {
-        coin: activeCoin, price: parseFloat(ticker.lastPrice),
-        liqZones: null, ta: null,
-        funding: parseFloat(ticker.fundingRate) * 100,
-        fgValue: null, sc: null, timestamp: Date.now()
+        fgValue: fg, sc: null, timestamp: Date.now()
       };
       render();
     } else {
