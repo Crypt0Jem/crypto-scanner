@@ -3664,24 +3664,49 @@ const posNote = ai.positionSizeNote
 ? `<div style="background:rgba(245,166,35,.08);border:1px solid var(--amber-b);border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);font-family:var(--mono)">💰 Position size: ${ai.positionSizeNote}</div>`
 : '';
 const ed = ai.entryDecision || {};
-const edCol = ed.action==='ENTER_NOW'?'var(--green)':ed.action==='AVOID'?'var(--red)':'var(--amber)';
-const edBg = ed.action==='ENTER_NOW'?'rgba(0,208,132,0.07)':ed.action==='AVOID'?'rgba(255,77,77,0.07)':'rgba(245,166,35,0.07)';
-const edIcon = ed.action==='ENTER_NOW'?'⚡':ed.action==='AVOID'?'❌':'👁';
-const decCard = ed.action ? `
-<div style="background:${edBg};border:1px solid ${edCol};border-radius:8px;padding:12px 16px;margin-bottom:12px">
-<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);margin-bottom:6px">AI Entry Decision</div>
-<div style="font-size:13px;font-weight:700;color:${edCol};font-family:var(--mono);margin-bottom:8px">${edIcon} ${ed.action.replace('_',' ')} — ${(ed.direction||'').toUpperCase()}</div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:10px;font-family:var(--mono)">
-<div><span style="color:var(--text3)">Entry </span><span style="color:var(--text1);font-weight:600">$${ed.entryPrice||'—'}</span></div>
-<div><span style="color:var(--text3)">Stop </span><span style="color:var(--red);font-weight:600">$${ed.stopLoss||'—'}</span></div>
-<div><span style="color:var(--text3)">TP1 </span><span style="color:var(--green);font-weight:600">$${ed.tp1||'—'}</span></div>
-<div><span style="color:var(--text3)">TP2 </span><span style="color:var(--green);font-weight:600">$${ed.tp2||'—'}</span></div>
-<div><span style="color:var(--text3)">R:R </span><span style="color:var(--text1)">${ed.riskReward||'—'}</span></div>
-<div><span style="color:var(--text3)">Leverage </span><span style="color:var(--amber)">${ed.leverageNote||'—'}</span></div>
+function makeDecCard(dir, action, entry, stop, tp1, tp2, rr, lev, trigger) {
+if (!action) return '';
+const isEnter = action === 'ENTER_NOW';
+const isAvoid = action === 'AVOID';
+const isLongDir = dir === 'long';
+const col = isEnter ? (isLongDir ? 'var(--green)' : 'var(--red)') : isAvoid ? 'rgba(255,77,77,0.5)' : 'var(--amber)';
+const bg = isEnter ? (isLongDir ? 'rgba(0,208,132,0.08)' : 'rgba(255,77,77,0.08)') : 'rgba(245,166,35,0.05)';
+const icon = isEnter ? (isLongDir ? '✅ LONG — ENTER' : '✅ SHORT — ENTER') : isAvoid ? (isLongDir ? '❌ LONG — AVOID' : '❌ SHORT — AVOID') : (isLongDir ? '👁 LONG — WAIT' : '👁 SHORT — WAIT');
+return `<div style="background:${bg};border:1px solid ${col};border-radius:6px;padding:10px 14px;flex:1;min-width:0">
+<div style="font-size:11px;font-weight:700;color:${col};font-family:var(--mono);margin-bottom:6px">${icon}</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:10px;font-family:var(--mono)">
+<div><span style="color:var(--text3)">Entry </span><span style="color:var(--text1);font-weight:600">$${entry||'—'}</span></div>
+<div><span style="color:var(--text3)">Stop </span><span style="color:var(--red);font-weight:600">$${stop||'—'}</span></div>
+<div><span style="color:var(--text3)">TP1 </span><span style="color:var(--green);font-weight:600">$${tp1||'—'}</span></div>
+<div><span style="color:var(--text3)">TP2 </span><span style="color:var(--green);font-weight:600">$${tp2||'—'}</span></div>
+<div><span style="color:var(--text3)">R:R </span><span style="color:var(--text1)">${rr||'—'}</span></div>
+<div><span style="color:var(--amber);font-weight:600">${lev||''}</span></div>
 </div>
-${ed.entryTrigger?`<div style="margin-top:8px;font-size:10px;color:var(--text2);font-family:var(--mono);border-top:1px solid rgba(255,255,255,.08);padding-top:8px">⏳ ${ed.entryTrigger}</div>`:''}
-${ed.stopRationale?`<div style="margin-top:4px;font-size:10px;color:var(--text3);font-family:var(--mono)">🛡 ${ed.stopRationale}</div>`:''}
-</div>` : '';
+${trigger?`<div style="margin-top:6px;font-size:9px;color:var(--text2);font-family:var(--mono);border-top:1px solid rgba(255,255,255,.06);padding-top:6px">⏳ ${trigger}</div>`:''}
+</div>`;
+}
+const longAction = ai.longDecision?.action || (ed.direction==='long' ? ed.action : 'WAIT');
+const longCard = makeDecCard('long', longAction,
+ai.longDecision?.entryPrice || ed.entryPrice,
+ai.longDecision?.stopLoss || ed.stopLoss,
+ai.longDecision?.tp1 || ed.tp1,
+ai.longDecision?.tp2 || ed.tp2,
+ai.longDecision?.riskReward || ed.riskReward,
+ai.longDecision?.leverageNote || ed.leverageNote,
+ai.longDecision?.entryTrigger || (ed.direction==='long' ? ed.entryTrigger : 'Wait for long confirmation'));
+const shortAction = ai.shortDecision?.action || (ed.direction==='short' ? ed.action : 'WAIT');
+const shortCard = makeDecCard('short', shortAction,
+ai.shortDecision?.entryPrice || (ed.direction==='short' ? ed.entryPrice : null),
+ai.shortDecision?.stopLoss || (ed.direction==='short' ? ed.stopLoss : null),
+ai.shortDecision?.tp1 || (ed.direction==='short' ? ed.tp1 : null),
+ai.shortDecision?.tp2 || (ed.direction==='short' ? ed.tp2 : null),
+ai.shortDecision?.riskReward || (ed.direction==='short' ? ed.riskReward : null),
+ai.shortDecision?.leverageNote || (ed.direction==='short' ? ed.leverageNote : null),
+ai.shortDecision?.entryTrigger || (ed.direction==='short' ? ed.entryTrigger : 'Wait for short confirmation'));
+const decCard = `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+<div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);font-family:var(--mono);width:100%;margin-bottom:4px">AI Entry Decision — Both Directions</div>
+${longCard}${shortCard}
+</div>`;
 aiEl.innerHTML=`
 <div class="card-title" style="color:var(--blue)">AI analysis — Claude (${activeMode} mode)
 <span style="margin-left:10px;font-size:9px;color:${cCol}">CONVICTION: ${(ai.conviction||'').toUpperCase()}</span>
